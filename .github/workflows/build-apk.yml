@@ -62,19 +62,51 @@ jobs:
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' "$GRADLE_FILE" || true
           sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' "$GRADLE_FILE" || true
 
-      # 7. Récupère les dépendances Dart/Flutter
+      # 7. Active le "core library desugaring", requis par le plugin
+      #    flutter_local_notifications (sinon le build échoue avec
+      #    "requires core library desugaring to be enabled").
+      - name: Activer le core library desugaring
+        run: |
+          set -e
+          GRADLE_FILE="android/app/build.gradle.kts"
+          if [ -f "$GRADLE_FILE" ]; then
+            echo "Patch Kotlin DSL : $GRADLE_FILE"
+            # Active le flag dans le bloc compileOptions { ... }
+            sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$GRADLE_FILE"
+            # Ajoute la dépendance de desugaring (bloc dependencies dédié à la fin du fichier)
+            cat >> "$GRADLE_FILE" << 'EOF'
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+}
+EOF
+          else
+            GRADLE_FILE="android/app/build.gradle"
+            echo "Patch Groovy DSL : $GRADLE_FILE"
+            sed -i '/compileOptions {/a\        coreLibraryDesugaringEnabled true' "$GRADLE_FILE"
+            cat >> "$GRADLE_FILE" << 'EOF'
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+}
+EOF
+          fi
+          echo "--- Contenu final ---"
+          cat "$GRADLE_FILE"
+
+      # 8. Récupère les dépendances Dart/Flutter
       - name: flutter pub get
         run: flutter pub get
 
-      # 8. Analyse statique (ne bloque pas le build en cas d'avertissement)
+      # 9. Analyse statique (ne bloque pas le build en cas d'avertissement)
       - name: Analyse du code (flutter analyze)
         run: flutter analyze || true
 
-      # 9. Construit l'APK en mode release
+      # 10. Construit l'APK en mode release
       - name: Build APK Release
         run: flutter build apk --release
 
-      # 10. Publie l'APK comme artefact téléchargeable du run (toujours,
+      # 11. Publie l'APK comme artefact téléchargeable du run (toujours,
       #     pour chaque push/PR).
       - name: Publier l'APK en tant qu'artefact
         uses: actions/upload-artifact@v4
@@ -83,7 +115,7 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
 
-      # 11. Si le push correspond à un tag (ex: v1.0.0), crée une Release
+      # 12. Si le push correspond à un tag (ex: v1.0.0), crée une Release
       #     GitHub avec l'APK attaché, prêt à télécharger/installer.
       - name: Créer une Release GitHub (si tag)
         if: startsWith(github.ref, 'refs/tags/')
