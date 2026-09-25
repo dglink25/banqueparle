@@ -1,0 +1,94 @@
+name: Build APK BanqueParle
+
+# Se déclenche à chaque push sur main/master ainsi que sur les Pull Requests
+# et manuellement via l'onglet "Actions" (workflow_dispatch).
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APK Release
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Récupère le code du dépôt
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
+      # 2. Installe Java (requis par Gradle / Android)
+      - name: Installer Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 3. Installe Flutter (stable)
+      - name: Installer Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Afficher les versions
+        run: flutter --version
+
+      # 4. Génère le dossier android/ manquant (le dépôt ne contient QUE
+      #    le code Dart + les overrides Android ; les fichiers volumineux
+      #    et binaires générés par Flutter — gradle wrapper, etc. — sont
+      #    recréés ici à chaque build, jamais commités).
+      - name: Générer la structure Android (flutter create)
+        run: |
+          flutter create --platforms=android --org com.banqueparle --project-name banqueparle .
+
+      # 5. Applique nos permissions et déclarations personnalisées
+      #    (mot-clé vocal, service d'arrière-plan, notifications plein écran).
+      - name: Appliquer l'AndroidManifest.xml personnalisé
+        run: |
+          cp android_overrides/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+
+      # 6. S'assure que le minSdkVersion est suffisant pour speech_to_text /
+      #    flutter_local_notifications (API 23 minimum recommandé).
+      - name: Ajuster minSdkVersion si nécessaire
+        run: |
+          GRADLE_FILE="android/app/build.gradle.kts"
+          if [ ! -f "$GRADLE_FILE" ]; then
+            GRADLE_FILE="android/app/build.gradle"
+          fi
+          echo "Fichier Gradle détecté : $GRADLE_FILE"
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' "$GRADLE_FILE" || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' "$GRADLE_FILE" || true
+
+      # 7. Récupère les dépendances Dart/Flutter
+      - name: flutter pub get
+        run: flutter pub get
+
+      # 8. Analyse statique (ne bloque pas le build en cas d'avertissement)
+      - name: Analyse du code (flutter analyze)
+        run: flutter analyze || true
+
+      # 9. Construit l'APK en mode release
+      - name: Build APK Release
+        run: flutter build apk --release
+
+      # 10. Publie l'APK comme artefact téléchargeable du run (toujours,
+      #     pour chaque push/PR).
+      - name: Publier l'APK en tant qu'artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: banqueparle-apk-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
+      # 11. Si le push correspond à un tag (ex: v1.0.0), crée une Release
+      #     GitHub avec l'APK attaché, prêt à télécharger/installer.
+      - name: Créer une Release GitHub (si tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

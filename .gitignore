@@ -1,0 +1,54 @@
+# ============================================================
+# BanqueParle — .gitignore
+# Le dépôt ne contient QUE le code source Dart et les fichiers
+# de configuration nécessaires. Les dossiers android/, ios/, build/
+# sont régénérés automatiquement par le workflow CI (flutter create).
+# ============================================================
+
+# --- Dossiers générés par Flutter (recréés à chaque build CI) ---
+/android/
+/ios/
+/linux/
+/macos/
+/windows/
+/web/
+/build/
+/.dart_tool/
+/.flutter-plugins
+/.flutter-plugins-dependencies
+/.packages
+/.pub-cache/
+/.pub/
+/pubspec.lock
+
+# --- Fichiers spécifiques IDE ---
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# --- Fichiers de log / crash ---
+*.log
+flutter_*.png
+app.*.map.json
+
+# --- Clés et secrets (NE JAMAIS COMMITTER) ---
+*.jks
+*.keystore
+key.properties
+google-services.json
+GoogleService-Info.plist
+.env
+
+# --- Fichiers de couverture de tests ---
+coverage/
+
+# --- Symboles ---
+app.*.symbols
+
+# --- Exceptions : on garde nos overrides Android versionnés ---
+!android_overrides/
+!android_overrides/**
