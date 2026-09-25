@@ -1,35 +1,18 @@
 import 'package:flutter/material.dart';
 
-/// -----------------------------------------------------------------------
-/// Charte graphique officielle de BanqueParle.
+/// Charte graphique de BanqueParle.
 ///
-/// RÈGLE STRICTE : aucune couleur en dehors de cette palette ne doit être
-/// utilisée nulle part dans l'application (pas de Colors.white, Colors.red,
-/// Colors.grey, etc.). Toute variation (transparence, halo lumineux) doit
-/// dériver de l'une des 4 couleurs ci-dessous via .withOpacity().
+/// Deux couleurs autorisees dans toute l'application, aucune autre :
+///   - Bleu  : #1A73E8
+///   - Blanc : #FFFFFF
 ///
-/// Source : cahier des charges §05 (Navy / Amber / Cream) +
-/// carte couleur fournie "Vert Émeraude #34A853" (Succès & Statut).
-/// -----------------------------------------------------------------------
+/// Toute variation d'intensite (ombres, surfaces attenuees) doit deriver
+/// de la couleur bleue via withOpacity, jamais d'une teinte nouvelle.
 class AppColors {
   AppColors._();
 
-  /// Fond principal de l'application.
-  static const Color navy = Color(0xFF0F1B2D);
+  static const Color blue = Color(0xFF1A73E8);
+  static const Color white = Color(0xFFFFFFFF);
 
-  /// Accentuation — bouton micro central, actions primaires.
-  static const Color amber = Color(0xFFE8A33D);
-
-  /// Texte principal sur fond sombre.
-  static const Color cream = Color(0xFFF5F3EC);
-
-  /// Succès & Statut : disponibilité, bon fonctionnement, confirmation
-  /// (RGB 52, 168, 83 — carte officielle fournie).
-  static const Color emerald = Color(0xFF34A853);
-
-  // --- Variantes translucides, dérivées UNIQUEMENT des 4 couleurs ci-dessus ---
-  static Color creamFaint([double opacity = 0.08]) => cream.withOpacity(opacity);
-  static Color navyFaint([double opacity = 0.4]) => navy.withOpacity(opacity);
-  static Color amberFaint([double opacity = 0.4]) => amber.withOpacity(opacity);
-  static Color emeraldFaint([double opacity = 0.4]) => emerald.withOpacity(opacity);
+  static Color blueFaint([double opacity = 0.08]) => blue.withOpacity(opacity);
 }

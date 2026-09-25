@@ -35,28 +35,24 @@ class FingerprintEnrollmentFlow {
   static const int kMaxFingers = 3;
   static const int kMaxAttemptsPerFinger = 3;
 
-  /// Lance le flux complet. Renvoie true si au moins une empreinte a été
-  /// validée avec succès.
   Future<bool> run() async {
     final canCheck = await _canUseBiometrics();
     if (!canCheck) {
       await speak(
-        'Aucune empreinte digitale n\'est configurée sur ce téléphone. '
-        'Veuillez vous rendre dans les réglages de sécurité de votre '
-        'appareil pour en enregistrer une, puis redites « Banque '
-        'Parlante » pour continuer.',
+        'Aucune empreinte digitale n\'est configuree sur ce telephone. '
+        'Nous passons directement au code secret.',
       );
+      await OnboardingStorage.setNeedsFingerprintStep(false);
       return false;
     }
 
-    final userName = await OnboardingStorage.getUserName() ?? '';
     int enrolledCount = await OnboardingStorage.getFingerprintCount();
     bool atLeastOneSuccess = enrolledCount > 0;
 
     while (enrolledCount < kMaxFingers) {
       final ordinal = enrolledCount == 0
           ? 'votre empreinte'
-          : 'une nouvelle empreinte (numéro ${enrolledCount + 1})';
+          : 'une nouvelle empreinte, numero ${enrolledCount + 1}';
       await speak('Veuillez poser votre doigt sur le lecteur d\'empreinte '
           'pour enregistrer $ordinal.');
 
@@ -66,12 +62,11 @@ class FingerprintEnrollmentFlow {
         enrolledCount++;
         atLeastOneSuccess = true;
         await OnboardingStorage.setFingerprintCount(enrolledCount);
-        await speak('Empreinte reconnue avec succès.');
+        await speak('Empreinte reconnue avec succes.');
 
         if (enrolledCount >= kMaxFingers) {
-          await speak(
-            'Vous avez atteint le nombre maximal de trois empreintes.',
-          );
+          await speak('Vous avez atteint le nombre maximal de trois '
+              'empreintes.');
           break;
         }
 
@@ -86,27 +81,18 @@ class FingerprintEnrollmentFlow {
 
         final yesNo = wantsMore != null ? parseYesNo(wantsMore) : null;
         if (yesNo != true) {
-          break; // L'utilisateur a dit non, ou n'a pas répondu clairement.
+          break;
         }
       } else {
         await speak(
-          'Échec après plusieurs tentatives. Nous arrêtons là '
-          'l\'enregistrement des empreintes pour le moment.',
+          'Echec apres plusieurs tentatives. Nous passons a l\'etape '
+          'suivante.',
         );
         break;
       }
     }
 
-    if (atLeastOneSuccess) {
-      final greetingName = userName.isNotEmpty ? ' $userName' : '';
-      await speak(
-        'Bienvenue$greetingName. Votre enrôlement est terminé. '
-        'Vous pouvez maintenant utiliser Banque Parlante normalement.',
-      );
-      await OnboardingStorage.setNeedsFingerprintStep(false);
-      await OnboardingStorage.setCompleted(true);
-    }
-
+    await OnboardingStorage.setNeedsFingerprintStep(false);
     return atLeastOneSuccess;
   }
 

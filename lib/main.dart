@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'services/wake_word_service.dart';
 import 'services/tts_service.dart';
+import 'utils/app_colors.dart';
 import 'utils/permissions_helper.dart';
 import 'screens/home_screen.dart';
 
@@ -30,8 +31,9 @@ class BanqueParleApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorSchemeSeed: const Color(0xFFE8A33D),
-        brightness: Brightness.dark,
+        colorSchemeSeed: AppColors.blue,
+        brightness: Brightness.light,
+        scaffoldBackgroundColor: AppColors.white,
         fontFamily: 'Roboto',
       ),
       // La logique de bienvenue / enrôlement / empreinte est gérée en

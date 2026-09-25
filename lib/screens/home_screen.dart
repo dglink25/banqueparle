@@ -4,14 +4,16 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
-import '../services/tts_service.dart';
-import '../services/stt_helper.dart';
 import '../services/fingerprint_enrollment_flow.dart';
+import '../services/onboarding_fields.dart';
+import '../services/pin_enrollment_flow.dart';
+import '../services/stt_helper.dart';
+import '../services/tts_service.dart';
 import '../services/voice_dialog.dart';
 import '../utils/app_colors.dart';
 import '../utils/onboarding_storage.dart';
 
-enum _ScreenState { idle, onboardingName, fingerprintStep, listening }
+enum _ScreenState { idle, formStep, securityStep }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -23,7 +25,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription? _wakeSub;
   _ScreenState _state = _ScreenState.idle;
-  String _statusText = 'Dites « Banque Parlante » pour commencer.';
+  String _statusText = 'Dites "Banque Parlante" pour commencer.';
   final stt.SpeechToText _speech = stt.SpeechToText();
 
   @override
@@ -33,11 +35,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _speech.initialize();
 
     final service = FlutterBackgroundService();
-    // Le service d'arrière-plan a déjà parlé (bienvenue, questions...) ;
-    // ici on se contente de refléter visuellement l'état, SANS reparler,
-    // pour éviter tout chevauchement de voix.
+    // Le service d'arriere-plan a deja parle (bienvenue, questions...) ;
+    // ici on se contente de refleter visuellement l'etat, sans reparler,
+    // pour eviter tout chevauchement de voix.
     _wakeSub = service.on('wake_detected').listen((event) {
-      if (mounted) setState(() => _statusText = 'À l\'écoute…');
+      if (mounted) setState(() => _statusText = 'A l\'ecoute...');
     });
 
     _checkPendingSteps(isColdStart: true);
@@ -57,84 +59,132 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Vérifie, à chaque ouverture/réapparition de l'app, s'il y a une étape
-  /// en attente (empreinte digitale) et la lance. Sinon, ne joue le
-  /// message de bienvenue générique QUE si le service d'arrière-plan ne
-  /// vient pas déjà de parler (pour éviter un doublon de voix).
+  /// Verifie, a chaque ouverture/reapparition de l'app, l'etape en attente
+  /// et la lance. Ordre : formulaire (identite/compte) si incomplet, puis
+  /// securite (empreinte, obligatoirement au premier plan, suivie du code
+  /// secret obligatoire). Le message de bienvenue generique n'est joue que
+  /// si le service d'arriere-plan ne vient pas deja de parler.
   Future<void> _checkPendingSteps({required bool isColdStart}) async {
-    final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
-
-    if (needsFingerprint) {
-      setState(() {
-        _state = _ScreenState.fingerprintStep;
-        _statusText = 'Configuration de votre empreinte digitale…';
-      });
-      final flow = FingerprintEnrollmentFlow(
-        speak: TtsService.instance.speak,
-        listen: () => sttListenOnce(_speech),
-      );
-      final success = await flow.run();
-      if (mounted) {
-        setState(() {
-          _state = _ScreenState.idle;
-          _statusText = success
-              ? 'Enrôlement terminé. Dites « Banque Parlante » à tout moment.'
-              : 'Redites « Banque Parlante » pour reprendre l\'enrôlement.';
-        });
+    final completed = await OnboardingStorage.isCompleted();
+    if (completed) {
+      final recentBgSpeech =
+          await OnboardingStorage.wasBackgroundSpeechRecent();
+      if (!recentBgSpeech) {
+        await TtsService.instance.speakWelcome();
       }
       return;
     }
 
-    final recentBgSpeech = await OnboardingStorage.wasBackgroundSpeechRecent();
-    if (!recentBgSpeech) {
-      // Ouverture manuelle (icône) : l'app peut se présenter elle-même.
-      final completed = await OnboardingStorage.isCompleted();
-      if (completed) {
-        await TtsService.instance.speakWelcome();
-      } else if (isColdStart) {
-        // Premier lancement manuel, jamais passé par le mot-clé : on
-        // propose de démarrer l'enrôlement directement depuis l'UI.
-        await _runNameCollectionInForeground();
+    final personalDone = await _allPresent(kPersonalInfoFields);
+    final bankDone = await _allPresent(kBankAccountFields);
+
+    if (!personalDone || !bankDone) {
+      if (isColdStart) {
+        await _runFormInForeground();
       }
+      return;
+    }
+
+    final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
+    final needsPin = await OnboardingStorage.needsPinStep();
+    if (needsFingerprint || needsPin) {
+      await _runSecurityInForeground();
     }
   }
 
-  Future<void> _runNameCollectionInForeground() async {
+  Future<bool> _allPresent(List<OnboardingField> fields) async {
+    for (final f in fields) {
+      final v = await OnboardingStorage.getField(f.key);
+      if (v == null || v.isEmpty) return false;
+    }
+    return true;
+  }
+
+  Future<void> _runFormInForeground() async {
     setState(() {
-      _state = _ScreenState.onboardingName;
-      _statusText = 'Enrôlement en cours…';
+      _state = _ScreenState.formStep;
+      _statusText = 'Enregistrement de vos informations...';
     });
+
     await TtsService.instance.speak(
       'Bienvenue sur Banque Parlante. Avant de commencer, j\'ai besoin '
-      'de quelques informations.',
+      'de quelques informations pour ouvrir votre profil.',
     );
-    final name = await askWithRetry(
+
+    final listenFn = () => sttListenOnce(_speech);
+
+    final personalOk = await runFormFields(
       speak: TtsService.instance.speak,
-      listen: () => sttListenOnce(_speech),
-      question: 'Quel est votre nom complet ?',
+      listen: listenFn,
+      fields: kPersonalInfoFields,
     );
-    if (name != null) {
-      await OnboardingStorage.setUserName(name);
-      await TtsService.instance.speak(
-        'Merci $name. Passons maintenant à la configuration de votre '
-        'empreinte digitale.',
-      );
+    final bankOk = personalOk &&
+        await runFormFields(
+          speak: TtsService.instance.speak,
+          listen: listenFn,
+          fields: kBankAccountFields,
+        );
+
+    if (personalOk && bankOk) {
       await OnboardingStorage.setNeedsFingerprintStep(true);
-      if (mounted) await _checkPendingSteps(isColdStart: false);
+      await OnboardingStorage.setNeedsPinStep(true);
+      await _runSecurityInForeground();
     } else {
-      if (mounted) {
-        setState(() {
-          _state = _ScreenState.idle;
-          _statusText = 'Redites « Banque Parlante » pour continuer.';
-        });
+      setState(() {
+        _state = _ScreenState.idle;
+        _statusText = 'Redites "Banque Parlante" pour continuer.';
+      });
+    }
+  }
+
+  Future<void> _runSecurityInForeground() async {
+    setState(() {
+      _state = _ScreenState.securityStep;
+      _statusText = 'Configuration de la securite de votre compte...';
+    });
+
+    final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
+    if (needsFingerprint) {
+      final fingerprintFlow = FingerprintEnrollmentFlow(
+        speak: TtsService.instance.speak,
+        listen: () => sttListenOnce(_speech),
+      );
+      await fingerprintFlow.run();
+    }
+
+    final needsPin = await OnboardingStorage.needsPinStep();
+    if (needsPin) {
+      final pinFlow = PinEnrollmentFlow(
+        speak: TtsService.instance.speak,
+        listen: () => sttListenOnce(_speech),
+      );
+      final pinOk = await pinFlow.run();
+      if (pinOk) {
+        final name = await OnboardingStorage.getField('full_name');
+        await OnboardingStorage.setCompleted(true);
+        final greetingName = (name != null && name.isNotEmpty) ? ' $name' : '';
+        await TtsService.instance.speak(
+          'Bienvenue$greetingName. Votre enrolement est termine. '
+          'Vous pouvez maintenant utiliser Banque Parlante.',
+        );
       }
+    }
+
+    if (mounted) {
+      final completed = await OnboardingStorage.isCompleted();
+      setState(() {
+        _state = _ScreenState.idle;
+        _statusText = completed
+            ? 'Dites "Banque Parlante" a tout moment.'
+            : 'Redites "Banque Parlante" pour terminer la securite.';
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.navy,
+      backgroundColor: AppColors.white,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -144,7 +194,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const Text(
                 'BanqueParle',
                 style: TextStyle(
-                  color: AppColors.cream,
+                  color: AppColors.blue,
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
                 ),
@@ -153,10 +203,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               Text(
                 _statusText,
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.creamFaint(0.75),
-                  fontSize: 16,
-                ),
+                style: const TextStyle(color: AppColors.blue, fontSize: 16),
               ),
               const SizedBox(height: 48),
               _MicButton(active: _state != _ScreenState.idle),
@@ -165,43 +212,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 decoration: BoxDecoration(
-                  color: AppColors.creamFaint(0.06),
+                  color: AppColors.white,
+                  border: Border.all(color: AppColors.blue, width: 1.5),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.podcasts,
-                        color: AppColors.emerald, size: 18),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Écoute active en arrière-plan',
-                      style: TextStyle(color: AppColors.creamFaint(0.9)),
-                    ),
-                  ],
+                child: const Text(
+                  'Ecoute active en arriere-plan',
+                  style: TextStyle(color: AppColors.blue),
                 ),
               ),
               const SizedBox(height: 24),
-              ElevatedButton.icon(
+              ElevatedButton(
                 onPressed: () => TtsService.instance.speakWelcome(),
-                icon: const Icon(Icons.volume_up),
-                label: const Text('Rejouer le message de bienvenue'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.amber,
-                  foregroundColor: AppColors.navy,
+                  backgroundColor: AppColors.blue,
+                  foregroundColor: AppColors.white,
                   padding: const EdgeInsets.symmetric(
                       horizontal: 20, vertical: 14),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30)),
                 ),
+                child: const Text('Rejouer le message de bienvenue'),
               ),
               const SizedBox(height: 12),
-              TextButton.icon(
+              TextButton(
                 onPressed: () => openAppSettings(),
-                icon: Icon(Icons.settings, color: AppColors.creamFaint(0.8)),
-                label: Text(
-                  'Autoriser l\'ouverture automatique (réglages système)',
-                  style: TextStyle(color: AppColors.creamFaint(0.8)),
+                child: const Text(
+                  'Autoriser l\'ouverture automatique (reglages systeme)',
+                  style: TextStyle(color: AppColors.blue),
                 ),
               ),
             ],
@@ -218,22 +256,19 @@ class _MicButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color color = active ? AppColors.emerald : AppColors.amber;
     return Container(
       width: 140,
       height: 140,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: color,
-        boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(0.4),
-            blurRadius: 30,
-            spreadRadius: 10,
-          ),
-        ],
+        color: active ? AppColors.blue : AppColors.white,
+        border: Border.all(color: AppColors.blue, width: 3),
       ),
-      child: const Icon(Icons.mic, color: AppColors.navy, size: 56),
+      child: Icon(
+        Icons.mic,
+        color: active ? AppColors.white : AppColors.blue,
+        size: 56,
+      ),
     );
   }
 }

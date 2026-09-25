@@ -9,6 +9,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../utils/onboarding_storage.dart';
+import 'onboarding_fields.dart';
 import 'stt_helper.dart';
 import 'voice_dialog.dart';
 
@@ -24,8 +25,9 @@ import 'voice_dialog.dart';
 ///      d'ouvrir l'interface (restriction "Full-Screen Intent" d'Android
 ///      14+, voir README) ou si l'application a été totalement fermée.
 ///   2. S'il s'agit du tout premier usage, il mène l'enrôlement vocal
-///      (collecte du nom) intégralement en arrière-plan, sans dépendre
-///      de l'interface.
+///      complet (identité, compte bancaire) intégralement en arrière-plan,
+///      sans dépendre de l'interface. Champs déjà répondus lors d'une
+///      tentative précédente : ignorés (reprise naturelle).
 ///   3. Il tente en complément d'amener l'application au premier plan
 ///      (notification plein écran) pour l'étape empreinte digitale, qui
 ///      nécessite obligatoirement l'interface (contrainte Android :
@@ -65,6 +67,14 @@ bool containsWakeWord(String recognized) {
     if (norm.contains(normalize(variant))) return true;
   }
   return false;
+}
+
+Future<bool> _fieldsAllPresent(List<OnboardingField> fields) async {
+  for (final f in fields) {
+    final v = await OnboardingStorage.getField(f.key);
+    if (v == null || v.isEmpty) return false;
+  }
+  return true;
 }
 
 /// Initialise le service d'arrière-plan (à appeler une seule fois, dans main()).
@@ -184,61 +194,74 @@ void onServiceStart(ServiceInstance service) async {
       final completed = await OnboardingStorage.isCompleted();
 
       if (!completed) {
-        final existingName = await OnboardingStorage.getUserName();
+        final personalDone = await _fieldsAllPresent(kPersonalInfoFields);
+        final bankDone = await _fieldsAllPresent(kBankAccountFields);
+        final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
+        final needsPin = await OnboardingStorage.needsPinStep();
 
-        if (existingName == null || existingName.isEmpty) {
-          // --- Étape 1 : collecte du nom, entièrement headless ---
+        if (!personalDone || !bankDone) {
           await speak(
             'Bienvenue sur Banque Parlante. Avant de commencer, '
-            'j\'ai besoin de quelques informations.',
+            'j\'ai besoin de quelques informations pour ouvrir votre '
+            'profil.',
           );
           await OnboardingStorage.markBackgroundSpeech();
 
-          final name = await askWithRetry(
-            speak: speak,
-            listen: () => sttListenOnce(speech),
-            question: 'Quel est votre nom complet ?',
-          );
+          final listenFn = () => sttListenOnce(speech);
 
-          if (name == null) {
-            await speak(
-              'Je n\'ai pas réussi à vous entendre. Redites '
-              '« Banque Parlante » quand vous serez prêt à continuer.',
-            );
-            await OnboardingStorage.markBackgroundSpeech();
-          } else {
-            await OnboardingStorage.setUserName(name);
-            await speak(
-              'Merci $name. Pour terminer votre inscription, ouvrez '
-              'votre téléphone : l\'application va s\'ouvrir pour '
-              'configurer votre empreinte digitale.',
-            );
+          final personalOk = personalDone ||
+              await runFormFields(
+                speak: speak,
+                listen: listenFn,
+                fields: kPersonalInfoFields,
+              );
+
+          final bankOk = personalOk &&
+              (bankDone ||
+                  await runFormFields(
+                    speak: speak,
+                    listen: listenFn,
+                    fields: kBankAccountFields,
+                  ));
+
+          if (personalOk && bankOk) {
             await OnboardingStorage.setNeedsFingerprintStep(true);
+            await OnboardingStorage.setNeedsPinStep(true);
+            await speak(
+              'Merci. Pour finaliser votre inscription, ouvrez votre '
+              'telephone : nous allons configurer la securite de votre '
+              'compte, empreinte digitale puis code secret.',
+            );
             await OnboardingStorage.markBackgroundSpeech();
             await _triggerAppWakeUp(flnp, service);
+          } else {
+            await speak(
+              'Je n\'ai pas reussi a vous entendre. Redites '
+              '"Banque Parlante" quand vous serez pret a continuer.',
+            );
+            await OnboardingStorage.markBackgroundSpeech();
           }
-        } else if (await OnboardingStorage.needsFingerprintStep()) {
-          // --- Nom déjà connu, empreinte pas encore configurée ---
+        } else if (needsFingerprint || needsPin) {
           await speak(
-            'Il reste à configurer votre empreinte digitale, $existingName. '
-            'Merci d\'ouvrir votre téléphone.',
+            'Il reste a finaliser la securite de votre compte. '
+            'Merci d\'ouvrir votre telephone.',
           );
           await OnboardingStorage.markBackgroundSpeech();
           await _triggerAppWakeUp(flnp, service);
         }
       } else {
-        // --- Utilisation normale (enrôlement déjà terminé) ---
-        final name = await OnboardingStorage.getUserName();
+        // --- Utilisation normale (enrolement deja termine) ---
+        final name = await OnboardingStorage.getField('full_name');
         final greeting = (name != null && name.isNotEmpty)
-            ? 'Bienvenue $name. Je vous écoute.'
-            : 'Bienvenue sur Banque Parlante. Je vous écoute.';
+            ? 'Bienvenue $name. Je vous ecoute.'
+            : 'Bienvenue sur Banque Parlante. Je vous ecoute.';
         await speak(greeting);
         await OnboardingStorage.markBackgroundSpeech();
         await _triggerAppWakeUp(flnp, service);
         service.invoke('wake_detected');
       }
     } catch (e) {
-      debugPrint('[WakeWord] Erreur pendant le traitement du mot-clé: $e');
+      debugPrint('[WakeWord] Erreur pendant le traitement du mot-cle: $e');
     } finally {
       handlingWakeWord = false;
     }
@@ -252,7 +275,7 @@ void onServiceStart(ServiceInstance service) async {
             onResult: (result) async {
               final text = result.recognizedWords;
               if (containsWakeWord(text)) {
-                debugPrint('[WakeWord] ✅ Mot-clé détecté !');
+                debugPrint('[WakeWord] Mot-cle detecte.');
                 await speech.stop();
                 await handleWakeWordDetected();
               }

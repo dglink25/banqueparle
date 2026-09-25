@@ -1,5 +1,5 @@
 /// -----------------------------------------------------------------------
-/// Dialogue vocal générique (question → écoute → relance si silence).
+/// Dialogue vocal generique (question, ecoute, relance si silence).
 /// Utilisable aussi bien depuis le service d'arrière-plan (headless) que
 /// depuis l'interface au premier plan : on lui passe simplement les
 /// fonctions "parler" et "écouter" à utiliser.

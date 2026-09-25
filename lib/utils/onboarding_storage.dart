@@ -9,8 +9,11 @@ class OnboardingStorage {
   static const _kCompleted = 'onboarding_completed';
   static const _kUserName = 'user_name';
   static const _kNeedsFingerprint = 'needs_fingerprint_step';
+  static const _kNeedsPin = 'needs_pin_step';
   static const _kFingerprintCount = 'fingerprint_enrolled_count';
+  static const _kPinHash = 'security_pin_hash';
   static const _kLastBackgroundSpeechAt = 'last_background_speech_at_ms';
+  static const _kFieldPrefix = 'field_';
 
   static Future<bool> isCompleted() async {
     final p = await SharedPreferences.getInstance();
@@ -52,6 +55,43 @@ class OnboardingStorage {
     await p.setInt(_kFingerprintCount, value);
   }
 
+  /// Stockage generique des champs du formulaire d'identite / de compte.
+  /// Permet d'ajouter ou de modifier des champs sans changer le schema.
+  static Future<String?> getField(String key) async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString('$_kFieldPrefix$key');
+  }
+
+  static Future<void> setField(String key, String value) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('$_kFieldPrefix$key', value);
+  }
+
+  static Future<bool> needsPinStep() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_kNeedsPin) ?? false;
+  }
+
+  static Future<void> setNeedsPinStep(bool value) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kNeedsPin, value);
+  }
+
+  static Future<bool> hasPin() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kPinHash) != null;
+  }
+
+  static Future<void> setPinHash(String hash) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kPinHash, hash);
+  }
+
+  static Future<String?> getPinHash() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kPinHash);
+  }
+
   /// Marque l'instant où le service d'arrière-plan vient de parler, pour
   /// que l'UI (si elle s'ouvre juste après) ne répète pas le même message.
   static Future<void> markBackgroundSpeech() async {
@@ -71,10 +111,17 @@ class OnboardingStorage {
 
   static Future<void> resetAll() async {
     final p = await SharedPreferences.getInstance();
-    await p.remove(_kCompleted);
-    await p.remove(_kUserName);
-    await p.remove(_kNeedsFingerprint);
-    await p.remove(_kFingerprintCount);
-    await p.remove(_kLastBackgroundSpeechAt);
+    final keys = p.getKeys().where((k) =>
+        k == _kCompleted ||
+        k == _kUserName ||
+        k == _kNeedsFingerprint ||
+        k == _kNeedsPin ||
+        k == _kFingerprintCount ||
+        k == _kPinHash ||
+        k == _kLastBackgroundSpeechAt ||
+        k.startsWith(_kFieldPrefix));
+    for (final k in keys.toList()) {
+      await p.remove(k);
+    }
   }
 }
