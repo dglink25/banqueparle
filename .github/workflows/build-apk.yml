@@ -45,10 +45,18 @@ jobs:
           flutter create --platforms=android --org com.banqueparle --project-name banqueparle .
 
       # 5. Applique nos permissions et déclarations personnalisées
-      #    (mot-clé vocal, service d'arrière-plan, notifications plein écran).
-      - name: Appliquer l'AndroidManifest.xml personnalisé
+      #    (mot-clé vocal, service d'arrière-plan, notifications plein écran,
+      #    biométrie).
+      - name: Appliquer l'AndroidManifest.xml et le MainActivity.kt personnalisés
         run: |
+          set -e
           cp android_overrides/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          KOTLIN_DIR="android/app/src/main/kotlin/com/banqueparle/banqueparle"
+          mkdir -p "$KOTLIN_DIR"
+          cp android_overrides/main/kotlin/MainActivity.kt "$KOTLIN_DIR/MainActivity.kt"
+          cp android_overrides/test/widget_test.dart test/widget_test.dart
+          echo "--- MainActivity.kt appliqué ---"
+          cat "$KOTLIN_DIR/MainActivity.kt"
 
       # 6. S'assure que le minSdkVersion est suffisant pour speech_to_text /
       #    flutter_local_notifications (API 23 minimum recommandé).

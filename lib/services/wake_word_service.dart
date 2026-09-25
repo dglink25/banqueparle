@@ -5,20 +5,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+
+import '../utils/onboarding_storage.dart';
+import 'stt_helper.dart';
+import 'voice_dialog.dart';
 
 /// -----------------------------------------------------------------------
 /// WakeWordService
 ///
-/// Ce service tourne en Foreground Service Android (notification
-/// persistante) et écoute en continu le microphone via speech_to_text.
-/// Dès que la phrase "banque parlante" (ou une variante phonétique proche)
-/// est reconnue, il :
-///   1. Affiche une notification "Full-Screen Intent" qui réveille
-///      l'écran et ramène l'application au premier plan (comme un appel
-///      entrant), MÊME si le téléphone est verrouillé.
-///   2. Envoie un signal à l'UI (si déjà ouverte) pour déclencher
-///      immédiatement le message de bienvenue vocal.
+/// Tourne en Foreground Service Android (notification persistante) et
+/// écoute en continu le microphone via speech_to_text.
+///
+/// Dès que « Banque Parlante » est détecté :
+///   1. Le service PARLE LUI-MÊME (TTS embarqué dans cet isolat headless),
+///      ce qui garantit une réponse vocale même si Android refuse
+///      d'ouvrir l'interface (restriction "Full-Screen Intent" d'Android
+///      14+, voir README) ou si l'application a été totalement fermée.
+///   2. S'il s'agit du tout premier usage, il mène l'enrôlement vocal
+///      (collecte du nom) intégralement en arrière-plan, sans dépendre
+///      de l'interface.
+///   3. Il tente en complément d'amener l'application au premier plan
+///      (notification plein écran) pour l'étape empreinte digitale, qui
+///      nécessite obligatoirement l'interface (contrainte Android :
+///      la biométrie ne peut être invoquée que depuis un écran affiché).
 /// -----------------------------------------------------------------------
 
 const String kNotifChannelId = 'banqueparle_wakeword_channel';
@@ -26,8 +37,7 @@ const String kNotifChannelName = 'BanqueParle - Écoute active';
 const int kForegroundNotifId = 888;
 const int kWakeNotifId = 999;
 
-/// Mots-clés déclencheurs et variantes phonétiques / homophones tolérées
-/// (le cahier des charges impose la gestion des homophones du français).
+/// Variantes phonétiques / homophones tolérées pour le mot-clé.
 const List<String> kWakeVariants = [
   'banque parlante',
   'banc parlant',
@@ -37,7 +47,6 @@ const List<String> kWakeVariants = [
   'ma banque parlante',
 ];
 
-/// Normalise une chaîne : minuscules, sans accents, espaces multiples réduits.
 String normalize(String input) {
   const withAccents = 'àâäáãåçéèêëíìîïñóòôöõúùûüýÿ';
   const withoutAccents = 'aaaaaaceeeeiiiinooooouuuuyy';
@@ -50,7 +59,6 @@ String normalize(String input) {
   return out;
 }
 
-/// Vérifie si le texte reconnu contient une variante du mot-clé.
 bool containsWakeWord(String recognized) {
   final norm = normalize(recognized);
   for (final variant in kWakeVariants) {
@@ -67,7 +75,6 @@ Future<void> initializeWakeWordService() async {
   const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
   await flnp.initialize(const InitializationSettings(android: androidInit));
 
-  // Canal pour la notification persistante du service (discrète)
   const serviceChannel = AndroidNotificationChannel(
     kNotifChannelId,
     kNotifChannelName,
@@ -75,7 +82,6 @@ Future<void> initializeWakeWordService() async {
     importance: Importance.low,
   );
 
-  // Canal pour la notification de réveil (bruyante, plein écran, comme un appel)
   const wakeChannel = AndroidNotificationChannel(
     'banqueparle_wake_channel',
     'BanqueParle - Réveil',
@@ -123,6 +129,27 @@ void onServiceStart(ServiceInstance service) async {
   const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
   await flnp.initialize(const InitializationSettings(android: androidInit));
 
+  // TTS propre à cet isolat headless : c'est LUI qui garantit la réponse
+  // vocale même si l'interface ne s'ouvre pas.
+  final FlutterTts tts = FlutterTts();
+  await tts.setLanguage('fr-FR');
+  await tts.setSpeechRate(0.5);
+  await tts.setPitch(1.0);
+  await tts.setVolume(1.0);
+  Future<void> speak(String text) async {
+    await tts.stop();
+    await tts.speak(text);
+    // Attend la fin de la lecture pour ne pas enchaîner les phrases.
+    final completer = Completer<void>();
+    tts.setCompletionHandler(() {
+      if (!completer.isCompleted) completer.complete();
+    });
+    await completer.future.timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {},
+    );
+  }
+
   bool speechReady = await speech.initialize(
     onError: (e) => debugPrint('[WakeWord] Erreur STT: $e'),
     onStatus: (status) => debugPrint('[WakeWord] Statut STT: $status'),
@@ -147,20 +174,87 @@ void onServiceStart(ServiceInstance service) async {
     return;
   }
 
-  // Boucle d'écoute continue : speech_to_text s'arrête après un silence
-  // ou une durée max, donc on la relance en continu tant que le service vit.
+  bool handlingWakeWord = false; // évite les déclenchements concurrents
+
+  Future<void> handleWakeWordDetected() async {
+    if (handlingWakeWord) return;
+    handlingWakeWord = true;
+    try {
+      await speech.stop();
+      final completed = await OnboardingStorage.isCompleted();
+
+      if (!completed) {
+        final existingName = await OnboardingStorage.getUserName();
+
+        if (existingName == null || existingName.isEmpty) {
+          // --- Étape 1 : collecte du nom, entièrement headless ---
+          await speak(
+            'Bienvenue sur Banque Parlante. Avant de commencer, '
+            'j\'ai besoin de quelques informations.',
+          );
+          await OnboardingStorage.markBackgroundSpeech();
+
+          final name = await askWithRetry(
+            speak: speak,
+            listen: () => sttListenOnce(speech),
+            question: 'Quel est votre nom complet ?',
+          );
+
+          if (name == null) {
+            await speak(
+              'Je n\'ai pas réussi à vous entendre. Redites '
+              '« Banque Parlante » quand vous serez prêt à continuer.',
+            );
+            await OnboardingStorage.markBackgroundSpeech();
+          } else {
+            await OnboardingStorage.setUserName(name);
+            await speak(
+              'Merci $name. Pour terminer votre inscription, ouvrez '
+              'votre téléphone : l\'application va s\'ouvrir pour '
+              'configurer votre empreinte digitale.',
+            );
+            await OnboardingStorage.setNeedsFingerprintStep(true);
+            await OnboardingStorage.markBackgroundSpeech();
+            await _triggerAppWakeUp(flnp, service);
+          }
+        } else if (await OnboardingStorage.needsFingerprintStep()) {
+          // --- Nom déjà connu, empreinte pas encore configurée ---
+          await speak(
+            'Il reste à configurer votre empreinte digitale, $existingName. '
+            'Merci d\'ouvrir votre téléphone.',
+          );
+          await OnboardingStorage.markBackgroundSpeech();
+          await _triggerAppWakeUp(flnp, service);
+        }
+      } else {
+        // --- Utilisation normale (enrôlement déjà terminé) ---
+        final name = await OnboardingStorage.getUserName();
+        final greeting = (name != null && name.isNotEmpty)
+            ? 'Bienvenue $name. Je vous écoute.'
+            : 'Bienvenue sur Banque Parlante. Je vous écoute.';
+        await speak(greeting);
+        await OnboardingStorage.markBackgroundSpeech();
+        await _triggerAppWakeUp(flnp, service);
+        service.invoke('wake_detected');
+      }
+    } catch (e) {
+      debugPrint('[WakeWord] Erreur pendant le traitement du mot-clé: $e');
+    } finally {
+      handlingWakeWord = false;
+    }
+  }
+
   Future<void> listenLoop() async {
     while (true) {
-      if (!speech.isListening) {
+      if (!speech.isListening && !handlingWakeWord) {
         try {
           await speech.listen(
             onResult: (result) async {
               final text = result.recognizedWords;
-              debugPrint('[WakeWord] Entendu: "$text"');
               if (containsWakeWord(text)) {
                 debugPrint('[WakeWord] ✅ Mot-clé détecté !');
                 await speech.stop();
-                await _triggerAppWakeUp(flnp, service);
+                await handleWakeWordDetected();
               }
             },
             listenFor: const Duration(seconds: 55),
@@ -177,8 +271,6 @@ void onServiceStart(ServiceInstance service) async {
     }
   }
 
-  // Ping périodique pour garder le service visible / vivant et mettre
-  // à jour la notification persistante avec un statut clair.
   Timer.periodic(const Duration(seconds: 10), (timer) async {
     if (service is AndroidServiceInstance) {
       if (await service.isForegroundService()) {
@@ -188,7 +280,7 @@ void onServiceStart(ServiceInstance service) async {
           speech.isListening
               ? 'En écoute du mot-clé « Banque Parlante »…'
               : 'Reprise de l\'écoute…',
-          NotificationDetails(
+          const NotificationDetails(
             android: AndroidNotificationDetails(
               kNotifChannelId,
               kNotifChannelName,
@@ -206,13 +298,12 @@ void onServiceStart(ServiceInstance service) async {
   listenLoop();
 }
 
-/// Déclenche le réveil de l'application : notification plein écran
-/// (comme un appel entrant) + tentative de lancement direct de l'activité.
+/// Déclenche le réveil visuel de l'application : notification plein écran
+/// (comme un appel entrant), qui réveille l'écran et ouvre l'app SI le
+/// système l'autorise (voir README : permission "Notifications plein
+/// écran" à activer manuellement une fois sur Android 14+).
 Future<void> _triggerAppWakeUp(
     FlutterLocalNotificationsPlugin flnp, ServiceInstance service) async {
-  // 1. Notification "Full-Screen Intent" : réveille l'écran même verrouillé
-  //    et ouvre l'app au tap (comportement standard Android pour ce cas
-  //    d'usage, utilisé par les apps d'appel/alarme).
   await flnp.show(
     kWakeNotifId,
     'BanqueParle',
@@ -230,9 +321,5 @@ Future<void> _triggerAppWakeUp(
       ),
     ),
   );
-
-  // 2. Informe l'UI (si déjà visible en mémoire) qu'il faut jouer le
-  //    message de bienvenue immédiatement, sans attendre le tap sur la
-  //    notification.
   service.invoke('wake_detected');
 }

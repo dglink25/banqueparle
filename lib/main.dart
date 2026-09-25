@@ -34,9 +34,9 @@ class BanqueParleApp extends StatelessWidget {
         brightness: Brightness.dark,
         fontFamily: 'Roboto',
       ),
-      // Le message de bienvenue est joué automatiquement au premier
-      // affichage (ouverture manuelle OU ouverture via mot-clé vocal).
-      home: const HomeScreen(playWelcomeOnStart: true),
+      // La logique de bienvenue / enrôlement / empreinte est gérée en
+      // interne par HomeScreen selon l'état persistant (OnboardingStorage).
+      home: const HomeScreen(),
     );
   }
 }

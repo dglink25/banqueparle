@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_tts/flutter_tts.dart';
 
 /// Service centralisé de synthèse vocale (Text-To-Speech), en français,
@@ -18,10 +19,23 @@ class TtsService {
     _isInitialized = true;
   }
 
+  /// Parle et ATTEND la fin réelle de la lecture (important pour enchaîner
+  /// une question puis une écoute, sans que les deux se chevauchent).
   Future<void> speak(String text) async {
     await init();
     await _tts.stop();
+    final completer = Completer<void>();
+    _tts.setCompletionHandler(() {
+      if (!completer.isCompleted) completer.complete();
+    });
+    _tts.setCancelHandler(() {
+      if (!completer.isCompleted) completer.complete();
+    });
     await _tts.speak(text);
+    await completer.future.timeout(
+      const Duration(seconds: 20),
+      onTimeout: () {},
+    );
   }
 
   Future<void> stop() => _tts.stop();
