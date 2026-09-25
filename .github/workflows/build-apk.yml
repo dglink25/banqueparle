@@ -71,25 +71,13 @@ jobs:
           GRADLE_FILE="android/app/build.gradle.kts"
           if [ -f "$GRADLE_FILE" ]; then
             echo "Patch Kotlin DSL : $GRADLE_FILE"
-            # Active le flag dans le bloc compileOptions { ... }
             sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$GRADLE_FILE"
-            # Ajoute la dépendance de desugaring (bloc dependencies dédié à la fin du fichier)
-            cat >> "$GRADLE_FILE" << 'EOF'
-
-dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-}
-EOF
+            printf '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n' >> "$GRADLE_FILE"
           else
             GRADLE_FILE="android/app/build.gradle"
             echo "Patch Groovy DSL : $GRADLE_FILE"
             sed -i '/compileOptions {/a\        coreLibraryDesugaringEnabled true' "$GRADLE_FILE"
-            cat >> "$GRADLE_FILE" << 'EOF'
-
-dependencies {
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
-}
-EOF
+            printf "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n" >> "$GRADLE_FILE"
           fi
           echo "--- Contenu final ---"
           cat "$GRADLE_FILE"
