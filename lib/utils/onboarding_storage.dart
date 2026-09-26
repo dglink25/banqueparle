@@ -12,6 +12,7 @@ class OnboardingStorage {
   static const _kNeedsPin = 'needs_pin_step';
   static const _kFingerprintCount = 'fingerprint_enrolled_count';
   static const _kPinHash = 'security_pin_hash';
+  static const _kFlowInProgress = 'flow_in_progress';
   static const _kLastBackgroundSpeechAt = 'last_background_speech_at_ms';
   static const _kFieldPrefix = 'field_';
 
@@ -92,6 +93,20 @@ class OnboardingStorage {
     return p.getString(_kPinHash);
   }
 
+  /// Indique qu'un flux vocal (formulaire ou securite) est en cours au
+  /// premier plan. Le service d'arriere-plan consulte ce flag avant de
+  /// parler pour eviter deux voix simultanees si l'utilisateur redit le
+  /// mot-cle pendant que l'application est deja en train de le traiter.
+  static Future<bool> isFlowInProgress() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getBool(_kFlowInProgress) ?? false;
+  }
+
+  static Future<void> setFlowInProgress(bool value) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setBool(_kFlowInProgress, value);
+  }
+
   /// Marque l'instant où le service d'arrière-plan vient de parler, pour
   /// que l'UI (si elle s'ouvre juste après) ne répète pas le même message.
   static Future<void> markBackgroundSpeech() async {
@@ -118,6 +133,7 @@ class OnboardingStorage {
         k == _kNeedsPin ||
         k == _kFingerprintCount ||
         k == _kPinHash ||
+        k == _kFlowInProgress ||
         k == _kLastBackgroundSpeechAt ||
         k.startsWith(_kFieldPrefix));
     for (final k in keys.toList()) {

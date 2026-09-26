@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../services/fingerprint_enrollment_flow.dart';
@@ -12,6 +12,8 @@ import '../services/tts_service.dart';
 import '../services/voice_dialog.dart';
 import '../utils/app_colors.dart';
 import '../utils/onboarding_storage.dart';
+
+const _settingsChannel = MethodChannel('com.banqueparle.banqueparle/settings');
 
 enum _ScreenState { idle, formStep, securityStep }
 
@@ -27,6 +29,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   _ScreenState _state = _ScreenState.idle;
   String _statusText = 'Dites "Banque Parlante" pour commencer.';
   final stt.SpeechToText _speech = stt.SpeechToText();
+
+  // Empeche deux executions simultanees du flux (par exemple si initState
+  // et un evenement "resumed" se declenchent tous deux au demarrage, ce
+  // qui arrive reellement sur Android lors d'un lancement a froid). Sans
+  // ce verrou, deux instances du flux vocal / de la biometrie tournaient
+  // en parallele et se melangeaient (double question, double invite
+  // d'empreinte, audio superpose).
+  bool _flowInProgress = false;
 
   @override
   void initState() {
@@ -65,30 +75,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// secret obligatoire). Le message de bienvenue generique n'est joue que
   /// si le service d'arriere-plan ne vient pas deja de parler.
   Future<void> _checkPendingSteps({required bool isColdStart}) async {
-    final completed = await OnboardingStorage.isCompleted();
-    if (completed) {
-      final recentBgSpeech =
-          await OnboardingStorage.wasBackgroundSpeechRecent();
-      if (!recentBgSpeech) {
-        await TtsService.instance.speakWelcome();
+    if (_flowInProgress) return; // verrou pose de facon synchrone, ici
+    _flowInProgress = true;
+    try {
+      await OnboardingStorage.setFlowInProgress(true);
+
+      final completed = await OnboardingStorage.isCompleted();
+      if (completed) {
+        final recentBgSpeech =
+            await OnboardingStorage.wasBackgroundSpeechRecent();
+        if (!recentBgSpeech) {
+          await TtsService.instance.speakWelcome();
+        }
+        return;
       }
-      return;
-    }
 
-    final personalDone = await _allPresent(kPersonalInfoFields);
-    final bankDone = await _allPresent(kBankAccountFields);
+      final personalDone = await _allPresent(kPersonalInfoFields);
+      final bankDone = await _allPresent(kBankAccountFields);
 
-    if (!personalDone || !bankDone) {
-      if (isColdStart) {
-        await _runFormInForeground();
+      if (!personalDone || !bankDone) {
+        if (isColdStart) {
+          await _runForm();
+        }
+        return;
       }
-      return;
-    }
 
-    final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
-    final needsPin = await OnboardingStorage.needsPinStep();
-    if (needsFingerprint || needsPin) {
-      await _runSecurityInForeground();
+      final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
+      final needsPin = await OnboardingStorage.needsPinStep();
+      if (needsFingerprint || needsPin) {
+        await _runSecurity();
+      }
+    } finally {
+      _flowInProgress = false;
+      await OnboardingStorage.setFlowInProgress(false);
     }
   }
 
@@ -100,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return true;
   }
 
-  Future<void> _runFormInForeground() async {
+  Future<void> _runForm() async {
     setState(() {
       _state = _ScreenState.formStep;
       _statusText = 'Enregistrement de vos informations...';
@@ -128,7 +147,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (personalOk && bankOk) {
       await OnboardingStorage.setNeedsFingerprintStep(true);
       await OnboardingStorage.setNeedsPinStep(true);
-      await _runSecurityInForeground();
+      await _runSecurity();
     } else {
       setState(() {
         _state = _ScreenState.idle;
@@ -137,7 +156,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _runSecurityInForeground() async {
+  Future<void> _runSecurity() async {
     setState(() {
       _state = _ScreenState.securityStep;
       _statusText = 'Configuration de la securite de votre compte...';
@@ -236,7 +255,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => openAppSettings(),
+                onPressed: () =>
+                    _settingsChannel.invokeMethod('openFullScreenIntentSettings'),
                 child: const Text(
                   'Autoriser l\'ouverture automatique (reglages systeme)',
                   style: TextStyle(color: AppColors.blue),

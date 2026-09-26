@@ -9,6 +9,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../utils/onboarding_storage.dart';
+import '../utils/text_normalize.dart';
 import 'onboarding_fields.dart';
 import 'stt_helper.dart';
 import 'voice_dialog.dart';
@@ -49,22 +50,10 @@ const List<String> kWakeVariants = [
   'ma banque parlante',
 ];
 
-String normalize(String input) {
-  const withAccents = 'àâäáãåçéèêëíìîïñóòôöõúùûüýÿ';
-  const withoutAccents = 'aaaaaaceeeeiiiinooooouuuuyy';
-  var out = input.toLowerCase();
-  for (var i = 0; i < withAccents.length; i++) {
-    out = out.replaceAll(withAccents[i], withoutAccents[i]);
-  }
-  out = out.replaceAll(RegExp(r'[^a-z0-9\s]'), '');
-  out = out.replaceAll(RegExp(r'\s+'), ' ').trim();
-  return out;
-}
-
 bool containsWakeWord(String recognized) {
-  final norm = normalize(recognized);
+  final norm = normalizeText(recognized);
   for (final variant in kWakeVariants) {
-    if (norm.contains(normalize(variant))) return true;
+    if (norm.contains(normalizeText(variant))) return true;
   }
   return false;
 }
@@ -191,6 +180,15 @@ void onServiceStart(ServiceInstance service) async {
     handlingWakeWord = true;
     try {
       await speech.stop();
+
+      // Si l'interface est deja en train de traiter le formulaire ou la
+      // securite, ne pas parler par-dessus : cela causait un
+      // chevauchement audio et une ecoute concurrente contradictoire.
+      if (await OnboardingStorage.isFlowInProgress()) {
+        debugPrint('[WakeWord] Flux deja en cours au premier plan, ignore.');
+        return;
+      }
+
       final completed = await OnboardingStorage.isCompleted();
 
       if (!completed) {

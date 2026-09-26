@@ -1,3 +1,5 @@
+import '../utils/text_normalize.dart';
+
 /// -----------------------------------------------------------------------
 /// Dialogue vocal generique (question, ecoute, relance si silence).
 /// Utilisable aussi bien depuis le service d'arrière-plan (headless) que
@@ -36,15 +38,18 @@ Future<String?> askWithRetry({
 
 /// Interprète une réponse oui/non tolérante : accepte "1"/"oui" et
 /// "2"/"non" ainsi que quelques variantes courantes.
+///
+/// Comparaison mot par mot (et non "contains" sur la chaîne entière) pour
+/// éviter les faux positifs : par exemple "aucun" contient la sous-chaîne
+/// "un" et serait à tort interprété comme "oui" avec une simple recherche
+/// de sous-chaîne.
 bool? parseYesNo(String raw) {
-  final t = raw.toLowerCase().trim();
-  const yesWords = ['oui', '1', 'un', 'ouais', "d'accord", 'ok', 'yes'];
-  const noWords = ['non', '2', 'deux', 'no', 'nan', 'négatif'];
-  for (final w in yesWords) {
-    if (t.contains(w)) return true;
-  }
-  for (final w in noWords) {
-    if (t.contains(w)) return false;
+  final words = normalizedWords(raw);
+  const yesWords = {'oui', '1', 'un', 'une', 'ouais', 'ok'};
+  const noWords = {'non', '2', 'deux', 'no', 'nan', 'negatif'};
+  for (final w in words) {
+    if (yesWords.contains(w)) return true;
+    if (noWords.contains(w)) return false;
   }
   return null;
 }
