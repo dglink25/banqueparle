@@ -44,9 +44,8 @@ class TtsService {
   /// ou déclenchée par le mot-clé vocal).
   Future<void> speakWelcome() async {
     await speak(
-      'Bienvenue sur Banque Parlante. '
-      'Je vous écoute. Dites par exemple : consulter le solde, '
-      'historique des opérations, ou effectuer un virement.',
+      'Bienvenue sur Banque Parlante. Utilisez le pave numerique a '
+      'l\'ecran, ou dites "Banque Parlante" suivi de votre demande.',
     );
   }
 }

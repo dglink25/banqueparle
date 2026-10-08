@@ -4,18 +4,27 @@ import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
+import '../services/account_provisioning_service.dart';
+import '../services/advisor_flow.dart';
+import '../services/auth_gate.dart';
+import '../services/balance_flow.dart';
+import '../services/command_intent.dart';
 import '../services/fingerprint_enrollment_flow.dart';
+import '../services/flow_control.dart';
+import '../services/history_flow.dart';
 import '../services/onboarding_fields.dart';
+import '../services/otp_flow.dart';
 import '../services/pin_enrollment_flow.dart';
+import '../services/profile_flow.dart';
 import '../services/stt_helper.dart';
+import '../services/transfer_flow.dart';
 import '../services/tts_service.dart';
 import '../services/voice_dialog.dart';
 import '../utils/app_colors.dart';
+import '../utils/native_channel.dart';
 import '../utils/onboarding_storage.dart';
 
-const _settingsChannel = MethodChannel('com.banqueparle.banqueparle/settings');
-
-enum _ScreenState { idle, formStep, securityStep }
+enum _ScreenState { idle, formStep, securityStep, action }
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -26,30 +35,42 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription? _wakeSub;
+  StreamSubscription? _quitSub;
   _ScreenState _state = _ScreenState.idle;
+  BankIntent _activeIntent = BankIntent.none;
+  bool _enrolled = false;
   String _statusText = 'Dites "Banque Parlante" pour commencer.';
   final stt.SpeechToText _speech = stt.SpeechToText();
 
-  // Empeche deux executions simultanees du flux (par exemple si initState
-  // et un evenement "resumed" se declenchent tous deux au demarrage, ce
-  // qui arrive reellement sur Android lors d'un lancement a froid). Sans
-  // ce verrou, deux instances du flux vocal / de la biometrie tournaient
-  // en parallele et se melangeaient (double question, double invite
-  // d'empreinte, audio superpose).
+  // Verrou du controle d'enrolement : empeche deux executions simultanees
+  // (initState et un evenement "resumed" se declenchent tous deux au
+  // demarrage a froid sur Android).
   bool _flowInProgress = false;
+
+  // Execution des commandes bancaires. Une nouvelle commande (appui sur
+  // une touche) interrompt la precedente : la voix est coupee, l'ecoute
+  // et l'invite biometrique sont annulees, puis la nouvelle demarre.
+  bool _actionRunning = false;
+  int _requestSeq = 0;
+  CancelToken? _activeToken;
+  Future<void>? _activeRun;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _speech.initialize();
+    _refreshEnrolled();
 
     final service = FlutterBackgroundService();
-    // Le service d'arriere-plan a deja parle (bienvenue, questions...) ;
-    // ici on se contente de refleter visuellement l'etat, sans reparler,
-    // pour eviter tout chevauchement de voix.
     _wakeSub = service.on('wake_detected').listen((event) {
-      if (mounted) setState(() => _statusText = 'A l\'ecoute...');
+      if (!mounted) return;
+      _checkPendingSteps(isColdStart: false);
+    });
+    // Commande "quitter" dite apres le mot-cle : le service d'arriere-plan
+    // a deja prononce l'au revoir, l'interface se ferme sans reparler.
+    _quitSub = service.on('quit_requested').listen((event) {
+      _closeSession(announce: false);
     });
 
     _checkPendingSteps(isColdStart: true);
@@ -59,6 +80,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _wakeSub?.cancel();
+    _quitSub?.cancel();
     super.dispose();
   }
 
@@ -69,19 +91,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Verifie, a chaque ouverture/reapparition de l'app, l'etape en attente
-  /// et la lance. Ordre : formulaire (identite/compte) si incomplet, puis
-  /// securite (empreinte, obligatoirement au premier plan, suivie du code
-  /// secret obligatoire). Le message de bienvenue generique n'est joue que
-  /// si le service d'arriere-plan ne vient pas deja de parler.
+  Future<void> _refreshEnrolled() async {
+    final done = await OnboardingStorage.isCompleted();
+    if (mounted && done != _enrolled) setState(() => _enrolled = done);
+  }
+
+  // ---------------------------------------------------------------------
+  // Enrolement et reprise
+  // ---------------------------------------------------------------------
+
   Future<void> _checkPendingSteps({required bool isColdStart}) async {
-    if (_flowInProgress) return; // verrou pose de facon synchrone, ici
+    if (_flowInProgress || _actionRunning) return;
     _flowInProgress = true;
     try {
       await OnboardingStorage.setFlowInProgress(true);
 
       final completed = await OnboardingStorage.isCompleted();
       if (completed) {
+        await _refreshEnrolled();
+        final pending = await OnboardingStorage.getPendingAction();
+        if (pending != null) {
+          // Consomme l'action immediatement : un second declenchement
+          // (reprise de l'app) ne doit jamais la rejouer.
+          await OnboardingStorage.setPendingAction(null);
+          final intent = BankIntent.values.firstWhere(
+            (i) => i.name == pending,
+            orElse: () => BankIntent.none,
+          );
+          if (intent != BankIntent.none) {
+            unawaited(_startAction(intent));
+            return;
+          }
+        }
         final recentBgSpeech =
             await OnboardingStorage.wasBackgroundSpeechRecent();
         if (!recentBgSpeech) {
@@ -107,7 +148,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } finally {
       _flowInProgress = false;
-      await OnboardingStorage.setFlowInProgress(false);
+      // Si une commande vient de demarrer, c'est elle qui libere le
+      // drapeau partage a sa fin : ne pas le relacher ici.
+      if (!_actionRunning) {
+        await OnboardingStorage.setFlowInProgress(false);
+      }
     }
   }
 
@@ -117,6 +162,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (v == null || v.isEmpty) return false;
     }
     return true;
+  }
+
+  /// Cree, si ce n'est pas deja fait, le role bancaire dedie du client sur
+  /// Neon. Renvoie true si le compte est pret pour les operations.
+  Future<bool> _ensureProvisioned({SpeakFn? speak}) async {
+    final say = speak ?? TtsService.instance.speak;
+    if (await OnboardingStorage.isAccountProvisioned() &&
+        await AccountProvisioningService.isProvisioned()) {
+      return true;
+    }
+
+    final accountNumber = await OnboardingStorage.getField('account_number');
+    final ownerName = await OnboardingStorage.getField('full_name');
+    if (accountNumber == null || ownerName == null) return false;
+
+    await say('Activation de votre compte bancaire en cours.');
+    final result = await AccountProvisioningService.provision(
+      accountNumber: accountNumber,
+      ownerName: ownerName,
+    );
+    await say(result.message);
+    if (result.success) {
+      await OnboardingStorage.setAccountProvisioned(true);
+    }
+    return result.success;
   }
 
   Future<void> _runForm() async {
@@ -162,6 +232,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _statusText = 'Configuration de la securite de votre compte...';
     });
 
+    // Active le compte bancaire cote base de donnees. En cas d'echec
+    // (pas de connexion), l'enrolement continue ; l'activation sera
+    // retentee automatiquement a la premiere operation bancaire.
+    await _ensureProvisioned();
+
     final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
     if (needsFingerprint) {
       final fingerprintFlow = FingerprintEnrollmentFlow(
@@ -184,52 +259,253 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final greetingName = (name != null && name.isNotEmpty) ? ' $name' : '';
         await TtsService.instance.speak(
           'Bienvenue$greetingName. Votre enrolement est termine. '
-          'Vous pouvez maintenant utiliser Banque Parlante.',
+          'Utilisez le pave numerique a l\'ecran, ou dites "Banque '
+          'Parlante" suivi de votre demande.',
         );
       }
     }
 
+    await _refreshEnrolled();
     if (mounted) {
-      final completed = await OnboardingStorage.isCompleted();
       setState(() {
         _state = _ScreenState.idle;
-        _statusText = completed
-            ? 'Dites "Banque Parlante" a tout moment.'
+        _statusText = _enrolled
+            ? 'Dites "Banque Parlante" ou utilisez le pave numerique.'
             : 'Redites "Banque Parlante" pour terminer la securite.';
       });
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Commandes bancaires (touches 1 a 6 et 0)
+  // ---------------------------------------------------------------------
+
+  SpeakFn _speakFor(CancelToken t) => (String text) async {
+        t.throwIfCancelled();
+        await TtsService.instance.speak(text);
+        t.throwIfCancelled();
+      };
+
+  ListenFn _listenFor(CancelToken t) => () async {
+        t.throwIfCancelled();
+        final result = await sttListenOnce(_speech);
+        t.throwIfCancelled();
+        return result;
+      };
+
+  Future<void> _onKey(KeyDef key) async {
+    HapticFeedback.mediumImpact();
+    if (!_enrolled) return; // le pave n'est actif qu'apres l'enrolement
+    unawaited(_startAction(key.intent));
+  }
+
+  Future<void> _startAction(BankIntent intent) async {
+    final myId = ++_requestSeq;
+    _actionRunning = true;
+
+    // Interrompt immediatement ce qui est en cours.
+    _activeToken?.cancel();
+    await TtsService.instance.stop();
+    try {
+      await _speech.cancel();
+    } catch (_) {}
+    await AuthGate.cancelPrompt();
+
+    final previous = _activeRun;
+    if (previous != null) {
+      try {
+        await previous;
+      } catch (_) {}
+    }
+    if (myId != _requestSeq) return; // une commande plus recente a pris le relais
+
+    final token = CancelToken();
+    _activeToken = token;
+    final run = _executeAction(intent, token, myId);
+    _activeRun = run;
+    await run;
+  }
+
+  String _statusFor(BankIntent intent) {
+    switch (intent) {
+      case BankIntent.balance:
+        return 'Consultation du solde...';
+      case BankIntent.history:
+        return 'Historique des operations...';
+      case BankIntent.transfer:
+        return 'Virement en cours...';
+      case BankIntent.otp:
+        return 'Code de securite...';
+      case BankIntent.profile:
+        return 'Gestion du profil...';
+      case BankIntent.advisor:
+        return 'Appel du conseiller...';
+      case BankIntent.quit:
+        return 'Fermeture de la session...';
+      case BankIntent.none:
+        return '';
+    }
+  }
+
+  Future<void> _executeAction(
+    BankIntent intent,
+    CancelToken token,
+    int myId,
+  ) async {
+    final speak = _speakFor(token);
+    final listen = _listenFor(token);
+
+    await OnboardingStorage.setFlowInProgress(true);
+    if (mounted) {
+      setState(() {
+        _state = _ScreenState.action;
+        _activeIntent = intent;
+        _statusText = _statusFor(intent);
+      });
+    }
+
+    try {
+      switch (intent) {
+        case BankIntent.quit:
+          await speak('Session fermee. Au revoir.');
+          await _closeSession(announce: false);
+          return;
+
+        case BankIntent.advisor:
+          await AdvisorFlow(speak: speak).run();
+          break;
+
+        case BankIntent.profile:
+          await ProfileFlow(speak: speak, listen: listen).run();
+          break;
+
+        case BankIntent.balance:
+        case BankIntent.history:
+        case BankIntent.transfer:
+        case BankIntent.otp:
+          if (!await _ensureProvisioned(speak: speak)) {
+            await speak(
+              'Votre compte bancaire n\'est pas encore active. Verifiez '
+              'votre connexion internet puis reessayez.',
+            );
+            break;
+          }
+          if (intent == BankIntent.balance) {
+            await BalanceFlow(speak: speak, listen: listen).run();
+          } else if (intent == BankIntent.history) {
+            await HistoryFlow(speak: speak, listen: listen).run();
+          } else if (intent == BankIntent.transfer) {
+            await TransferFlow(speak: speak, listen: listen).run();
+          } else {
+            await OtpFlow(speak: speak, listen: listen).run();
+          }
+          break;
+
+        case BankIntent.none:
+          break;
+      }
+    } on FlowCancelled {
+      // Interrompu par l'appui sur une autre touche : rien a faire.
+    } catch (_) {
+      try {
+        await TtsService.instance.speak(
+          'Une erreur est survenue. Veuillez reessayer.',
+        );
+      } catch (_) {}
+    } finally {
+      // Seule la commande la plus recente libere l'etat partage.
+      if (myId == _requestSeq) {
+        _actionRunning = false;
+        _activeIntent = BankIntent.none;
+        await OnboardingStorage.setFlowInProgress(false);
+        if (mounted) {
+          setState(() {
+            _state = _ScreenState.idle;
+            _statusText =
+                'Dites "Banque Parlante" ou utilisez le pave numerique.';
+          });
+        }
+      }
+    }
+  }
+
+  /// Touche 0 - ferme la session et renvoie l'application en arriere-plan.
+  ///
+  /// L'application ne conserve aucun etat authentifie : chaque operation
+  /// sensible redemande l'identite. Fermer la session consiste donc a
+  /// couper voix, ecoute et invite biometrique, a liberer les drapeaux
+  /// partages, puis a fermer l'ecran. Le service d'arriere-plan continue
+  /// d'ecouter le mot-cle : c'est le "retour en mode veille".
+  Future<void> _closeSession({required bool announce}) async {
+    _requestSeq++;
+    _activeToken?.cancel();
+    await TtsService.instance.stop();
+    try {
+      await _speech.cancel();
+    } catch (_) {}
+    await AuthGate.cancelPrompt();
+
+    if (announce) {
+      try {
+        await TtsService.instance.speak('Session fermee. Au revoir.');
+      } catch (_) {}
+    }
+
+    await OnboardingStorage.setPendingAction(null);
+    await OnboardingStorage.setFlowInProgress(false);
+    _actionRunning = false;
+    await SystemNavigator.pop();
+  }
+
+  // ---------------------------------------------------------------------
+  // Interface : deux couleurs uniquement (bleu et blanc)
+  // ---------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
+    final busy = _state != _ScreenState.idle;
     return Scaffold(
       backgroundColor: AppColors.white,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Text(
                 'BanqueParle',
                 style: TextStyle(
                   color: AppColors.blue,
-                  fontSize: 32,
+                  fontSize: 28,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
                 _statusText,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: AppColors.blue, fontSize: 16),
+                style: const TextStyle(color: AppColors.blue, fontSize: 15),
               ),
-              const SizedBox(height: 48),
-              _MicButton(active: _state != _ScreenState.idle),
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
+              _MicIndicator(active: busy),
+              const SizedBox(height: 16),
+              _Keypad(
+                enabled: _enrolled,
+                activeIntent: _activeIntent,
+                onKey: _onKey,
+              ),
+              const SizedBox(height: 12),
+              if (!_enrolled)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'Le pave numerique sera disponible apres l\'enrolement.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.blue, fontSize: 13),
+                  ),
+                ),
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
                   color: AppColors.white,
                   border: Border.all(color: AppColors.blue, width: 1.5),
@@ -237,28 +513,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
                 child: const Text(
                   'Ecoute active en arriere-plan',
-                  style: TextStyle(color: AppColors.blue),
+                  style: TextStyle(color: AppColors.blue, fontSize: 13),
                 ),
               ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () => TtsService.instance.speakWelcome(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.blue,
-                  foregroundColor: AppColors.white,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 14),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                ),
-                child: const Text('Rejouer le message de bienvenue'),
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               TextButton(
                 onPressed: () =>
-                    _settingsChannel.invokeMethod('openFullScreenIntentSettings'),
+                    kNativeChannel.invokeMethod('openFullScreenIntentSettings'),
                 child: const Text(
                   'Autoriser l\'ouverture automatique (reglages systeme)',
+                  textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.blue),
                 ),
               ),
@@ -270,15 +534,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-class _MicButton extends StatelessWidget {
+class _MicIndicator extends StatelessWidget {
   final bool active;
-  const _MicButton({required this.active});
+  const _MicIndicator({required this.active});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 140,
-      height: 140,
+      width: 84,
+      height: 84,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: active ? AppColors.blue : AppColors.white,
@@ -287,7 +551,110 @@ class _MicButton extends StatelessWidget {
       child: Icon(
         Icons.mic,
         color: active ? AppColors.white : AppColors.blue,
-        size: 56,
+        size: 40,
+      ),
+    );
+  }
+}
+
+/// Pave numerique geant de secours (cahier des charges, section 3.2) :
+/// un appui interrompt la voix et execute immediatement la commande.
+class _Keypad extends StatelessWidget {
+  final bool enabled;
+  final BankIntent activeIntent;
+  final Future<void> Function(KeyDef) onKey;
+
+  const _Keypad({
+    required this.enabled,
+    required this.activeIntent,
+    required this.onKey,
+  });
+
+  Widget _cell(KeyDef k) => Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(5),
+          child: _KeyButton(
+            def: k,
+            enabled: enabled,
+            active: activeIntent == k.intent,
+            onTap: () => onKey(k),
+          ),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final zero = kKeypad.firstWhere((k) => k.key == '0');
+    return Column(
+      children: [
+        Row(children: [_cell(kKeypad[0]), _cell(kKeypad[1]), _cell(kKeypad[2])]),
+        Row(children: [_cell(kKeypad[3]), _cell(kKeypad[4]), _cell(kKeypad[5])]),
+        Row(children: [
+          const Expanded(child: SizedBox()),
+          _cell(zero),
+          const Expanded(child: SizedBox()),
+        ]),
+      ],
+    );
+  }
+}
+
+class _KeyButton extends StatelessWidget {
+  final KeyDef def;
+  final bool enabled;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _KeyButton({
+    required this.def,
+    required this.enabled,
+    required this.active,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = active ? AppColors.white : AppColors.blue;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: 'Touche ${def.key}, ${def.label}',
+      onTap: enabled ? onTap : null,
+      child: ExcludeSemantics(
+        child: Opacity(
+          opacity: enabled ? 1.0 : 0.4,
+          child: Material(
+            color: active ? AppColors.blue : AppColors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: AppColors.blue, width: 2.5),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: onTap,
+              child: AspectRatio(
+                aspectRatio: 1.15,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      def.key,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 38,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      def.label,
+                      style: TextStyle(color: foreground, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

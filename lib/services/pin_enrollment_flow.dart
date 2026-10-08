@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
+import '../utils/digit_parser.dart';
 import '../utils/onboarding_storage.dart';
 import 'voice_dialog.dart';
 
@@ -27,11 +28,14 @@ class PinEnrollmentFlow {
   static const int kPinLength = 4;
   static const int kMaxAttempts = 4;
 
-  Future<bool> run() async {
+  /// [introduction] permet d'adapter la phrase d'ouverture (definition
+  /// initiale a l'enrolement, ou changement depuis la gestion du profil).
+  Future<bool> run({String? introduction}) async {
     await speak(
-      'Pour renforcer la securite de votre compte, veuillez definir un '
-      'code secret a quatre chiffres. Ce code sera utilise si votre '
-      'empreinte digitale n\'est pas disponible.',
+      introduction ??
+          'Pour renforcer la securite de votre compte, veuillez definir un '
+              'code secret a quatre chiffres. Ce code sera utilise si votre '
+              'empreinte digitale n\'est pas disponible.',
     );
 
     for (var attempt = 1; attempt <= kMaxAttempts; attempt++) {
@@ -83,39 +87,11 @@ class PinEnrollmentFlow {
       );
       if (raw == null) return null;
 
-      final digits = _extractDigits(raw);
+      final digits = extractDigits(raw, maxLength: kPinLength);
       if (digits.length == kPinLength) {
         return digits;
       }
     }
     return null;
-  }
-
-  /// Extrait jusqu'a 4 chiffres d'une reponse vocale : soit dictes en
-  /// chiffres directement (le plus courant), soit en toutes lettres.
-  String _extractDigits(String raw) {
-    final wordToDigit = {
-      'zero': '0', 'un': '1', 'une': '1', 'deux': '2', 'trois': '3',
-      'quatre': '4', 'cinq': '5', 'six': '6', 'sept': '7', 'huit': '8',
-      'neuf': '9',
-    };
-    final buffer = StringBuffer();
-    final normalized = raw
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9\s]'), '')
-        .split(RegExp(r'\s+'));
-
-    for (final token in normalized) {
-      if (buffer.length >= kPinLength) break;
-      if (RegExp(r'^\d+$').hasMatch(token)) {
-        for (final ch in token.split('')) {
-          if (buffer.length >= kPinLength) break;
-          buffer.write(ch);
-        }
-      } else if (wordToDigit.containsKey(token)) {
-        buffer.write(wordToDigit[token]);
-      }
-    }
-    return buffer.toString();
   }
 }

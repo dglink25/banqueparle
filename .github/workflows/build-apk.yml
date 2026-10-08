@@ -9,6 +9,10 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+# Necessaire pour creer / remplacer la release "latest".
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build APK Release
@@ -98,25 +102,75 @@ jobs:
       - name: Analyse du code (flutter analyze)
         run: flutter analyze || true
 
-      # 10. Construit l'APK en mode release
-      - name: Build APK Release
-        run: flutter build apk --release
-
-      # 11. Publie l'APK comme artefact téléchargeable du run (toujours,
-      #     pour chaque push/PR).
-      - name: Publier l'APK en tant qu'artefact
-        uses: actions/upload-artifact@v4
-        with:
-          name: banqueparle-apk-${{ github.run_number }}
-          path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 30
-
-      # 12. Si le push correspond à un tag (ex: v1.0.0), crée une Release
-      #     GitHub avec l'APK attaché, prêt à télécharger/installer.
-      - name: Créer une Release GitHub (si tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/app/outputs/flutter-apk/app-release.apk
+      # 10. Verifie la presence des secrets de connexion a la base Neon.
+      #     Sans eux, l'APK se construit quand meme, mais les virements et
+      #     l'activation du compte sont desactives (l'application le dit a
+      #     l'utilisateur). Les valeurs ne sont jamais ecrites dans les logs.
+      - name: Verifier les secrets Neon
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEON_HOST: ${{ secrets.NEON_HOST }}
+          NEON_PROVISIONER_USER: ${{ secrets.NEON_PROVISIONER_USER }}
+          NEON_PROVISIONER_PASSWORD: ${{ secrets.NEON_PROVISIONER_PASSWORD }}
+        run: |
+          if [ -z "$NEON_HOST" ] || [ -z "$NEON_PROVISIONER_USER" ] || [ -z "$NEON_PROVISIONER_PASSWORD" ]; then
+            echo "::warning::Secrets Neon absents : les virements seront desactives dans cet APK. Voir README, section Base de donnees."
+          else
+            echo "Secrets Neon presents."
+          fi
+
+      # 11. Construit l'APK en mode release. Les parametres de connexion
+      #     sont injectes a la compilation (--dart-define) depuis les
+      #     secrets GitHub : ils ne figurent jamais dans le depot.
+      - name: Build APK Release
+        env:
+          NEON_HOST: ${{ secrets.NEON_HOST }}
+          NEON_DATABASE: ${{ secrets.NEON_DATABASE }}
+          NEON_PROVISIONER_USER: ${{ secrets.NEON_PROVISIONER_USER }}
+          NEON_PROVISIONER_PASSWORD: ${{ secrets.NEON_PROVISIONER_PASSWORD }}
+          # Numero du centre de relation client (touche 6). Un numero de
+          # telephone n'est pas un secret : variable ou secret, au choix.
+          ADVISOR_PHONE: ${{ vars.ADVISOR_PHONE || secrets.ADVISOR_PHONE }}
+        run: |
+          DB_NAME="${NEON_DATABASE:-banqueparle}"
+          if [ -z "$ADVISOR_PHONE" ]; then
+            echo "::warning::ADVISOR_PHONE absent : la touche 6 (conseiller) annoncera que le numero n'est pas configure."
+          fi
+          flutter build apk --release \
+            --dart-define=NEON_HOST="$NEON_HOST" \
+            --dart-define=NEON_DATABASE="$DB_NAME" \
+            --dart-define=NEON_PROVISIONER_USER="$NEON_PROVISIONER_USER" \
+            --dart-define=NEON_PROVISIONER_PASSWORD="$NEON_PROVISIONER_PASSWORD" \
+            --dart-define=ADVISOR_PHONE="$ADVISOR_PHONE"
+
+      # 12. Renomme le fichier en banqueparle.apk (nom constant).
+      - name: Renommer l'APK
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/banqueparle.apk
+          ls -l build/app/outputs/flutter-apk/
+
+      # 13. Publie l'APK sous un lien UNIQUE ET PERMANENT. La release
+      #     "latest" est supprimee puis recreee a chaque push : il n'existe
+      #     donc jamais qu'une seule version, et l'adresse de
+      #     telechargement ne change jamais :
+      #     https://github.com/<utilisateur>/<depot>/releases/download/latest/banqueparle.apk
+      #     (Pas de publication pour les pull requests.)
+      - name: Publier la derniere version (lien permanent)
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release delete latest --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" || true
+          gh release create latest build/app/outputs/flutter-apk/banqueparle.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "BanqueParle - derniere version" \
+            --notes "Version generee automatiquement a chaque push. Commit : $GITHUB_SHA" \
+            --latest
+          LINK="https://github.com/$GITHUB_REPOSITORY/releases/download/latest/banqueparle.apk"
+          echo "Lien de telechargement permanent : $LINK"
+          {
+            echo "### Telechargement"
+            echo ""
+            echo "$LINK"
+          } >> "$GITHUB_STEP_SUMMARY"

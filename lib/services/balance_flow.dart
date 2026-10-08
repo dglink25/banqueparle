@@ -1,0 +1,31 @@
+import '../utils/amount_parser.dart';
+import 'auth_gate.dart';
+import 'transfer_service.dart';
+import 'voice_dialog.dart';
+
+/// Touche 1 - Consulter le solde. Securite : biometrie.
+/// Lecture avec la precision des centimes lorsqu'il y en a.
+class BalanceFlow {
+  final SpeakFn speak;
+  final ListenFn listen;
+
+  BalanceFlow({required this.speak, required this.listen});
+
+  Future<void> run() async {
+    final gate = AuthGate(speak: speak, listen: listen);
+    if (!await gate.biometric('Consulter votre solde')) {
+      await speak('Identite non confirmee. Le solde n\'est pas communique.');
+      return;
+    }
+
+    final balance = await TransferService.getBalance();
+    if (balance == null) {
+      await speak(
+        'Impossible de lire votre solde. Verifiez votre connexion '
+        'internet, puis reessayez.',
+      );
+      return;
+    }
+    await speak('Votre solde est de ${speakAmount(balance)}.');
+  }
+}

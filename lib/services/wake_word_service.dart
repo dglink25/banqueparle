@@ -10,6 +10,7 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../utils/onboarding_storage.dart';
 import '../utils/text_normalize.dart';
+import 'command_intent.dart';
 import 'onboarding_fields.dart';
 import 'stt_helper.dart';
 import 'voice_dialog.dart';
@@ -251,12 +252,39 @@ void onServiceStart(ServiceInstance service) async {
         // --- Utilisation normale (enrolement deja termine) ---
         final name = await OnboardingStorage.getField('full_name');
         final greeting = (name != null && name.isNotEmpty)
-            ? 'Bienvenue $name. Je vous ecoute.'
-            : 'Bienvenue sur Banque Parlante. Je vous ecoute.';
+            ? 'Bienvenue $name.'
+            : 'Bienvenue sur Banque Parlante.';
         await speak(greeting);
         await OnboardingStorage.markBackgroundSpeech();
-        await _triggerAppWakeUp(flnp, service);
-        service.invoke('wake_detected');
+
+        // Ecoute la commande. Toutes les operations bancaires (reseau,
+        // biometrie) s'executent au premier plan : le service enregistre
+        // l'action demandee, puis reveille l'interface qui la traite.
+        // Seule la commande "quitter" se traite ici, sans interface.
+        final command = await askWithRetry(
+          speak: speak,
+          listen: () => sttListenOnce(speech),
+          question: kMenuQuestion,
+          maxRetries: 1,
+        );
+        final intent =
+            command != null ? detectIntent(command) : BankIntent.none;
+
+        if (intent == BankIntent.quit) {
+          await speak('Session fermee. Au revoir.');
+          await OnboardingStorage.markBackgroundSpeech();
+          service.invoke('quit_requested');
+        } else if (intent != BankIntent.none) {
+          await OnboardingStorage.setPendingAction(intent.name);
+          await speak('Tres bien. Ouvrez votre telephone si l\'ecran ne '
+              's\'allume pas.');
+          await OnboardingStorage.markBackgroundSpeech();
+          await _triggerAppWakeUp(flnp, service);
+        } else if (command != null) {
+          await speak('Je n\'ai pas compris cette commande. Redites '
+              '"Banque Parlante" pour recommencer.');
+          await OnboardingStorage.markBackgroundSpeech();
+        }
       }
     } catch (e) {
       debugPrint('[WakeWord] Erreur pendant le traitement du mot-cle: $e');
@@ -267,7 +295,14 @@ void onServiceStart(ServiceInstance service) async {
 
   Future<void> listenLoop() async {
     while (true) {
-      if (!speech.isListening && !handlingWakeWord) {
+      // Le micro ne peut servir qu'a une seule reconnaissance a la fois :
+      // pendant qu'un flux vocal tourne au premier plan, le service
+      // laisse la main (sinon les deux ecoutes se perturbent).
+      final foregroundBusy = await OnboardingStorage.isFlowInProgress();
+      if (foregroundBusy && speech.isListening) {
+        await speech.stop();
+      }
+      if (!speech.isListening && !handlingWakeWord && !foregroundBusy) {
         try {
           await speech.listen(
             onResult: (result) async {

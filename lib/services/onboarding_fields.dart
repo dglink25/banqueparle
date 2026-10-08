@@ -1,3 +1,4 @@
+import '../utils/digit_parser.dart';
 import '../utils/onboarding_storage.dart';
 import 'voice_dialog.dart';
 
@@ -37,6 +38,17 @@ class OnboardingField {
   });
 }
 
+/// Ne conserve que les chiffres (reconnaissance parfois renvoyee avec des
+/// espaces, ou en toutes lettres). Indispensable pour que le numero de
+/// compte enregistre soit identique a celui dicte par un expediteur lors
+/// d'un virement.
+String _normalizeDigits(String raw) {
+  final direct = raw.replaceAll(RegExp(r'[^0-9]'), '');
+  if (direct.isNotEmpty) return direct;
+  final fromWords = extractDigits(raw, maxLength: 24);
+  return fromWords.isNotEmpty ? fromWords : raw;
+}
+
 String _normalizeAccountType(String raw) {
   final t = raw.toLowerCase();
   if (t.contains('1') || t.contains('courant')) return 'Compte courant';
@@ -59,6 +71,7 @@ const List<OnboardingField> kPersonalInfoFields = [
   OnboardingField(
     'phone_number',
     'Quel est votre numero de telephone, pour les alertes de securite ?',
+    normalize: _normalizeDigits,
   ),
 ];
 
@@ -72,6 +85,7 @@ const List<OnboardingField> kBankAccountFields = [
   OnboardingField(
     'account_number',
     'Quel est votre numero de compte bancaire ?',
+    normalize: _normalizeDigits,
   ),
   OnboardingField(
     'account_type',
@@ -81,6 +95,47 @@ const List<OnboardingField> kBankAccountFields = [
     normalize: _normalizeAccountType,
   ),
 ];
+
+/// Pose la question d'un champ, normalise la reponse, et la fait confirmer
+/// oralement si le champ l'exige. Renvoie la valeur confirmee, ou null si
+/// l'utilisateur n'a pas repondu apres plusieurs relances. Utilisee aussi
+/// bien par le formulaire d'enrolement que par la modification du profil.
+Future<String?> collectFieldValue({
+  required SpeakFn speak,
+  required ListenFn listen,
+  required OnboardingField field,
+}) async {
+  while (true) {
+    final rawAnswer = await askWithRetry(
+      speak: speak,
+      listen: listen,
+      question: field.question,
+    );
+    if (rawAnswer == null) return null;
+
+    final value =
+        field.normalize != null ? field.normalize!(rawAnswer) : rawAnswer;
+
+    if (!field.confirmBack) return value;
+
+    // Les longues suites de chiffres sont epelees pour que la synthese
+    // vocale ne les lise pas comme un tres grand nombre.
+    final spoken = RegExp(r'^\d{5,}$').hasMatch(value)
+        ? value.split('').join(' ')
+        : value;
+
+    final confirmAnswer = await askWithRetry(
+      speak: speak,
+      listen: listen,
+      question: 'Vous avez dit : $spoken. Est-ce correct ? '
+          'Dites 1 pour oui, ou 2 pour non.',
+      maxRetries: 2,
+    );
+    final yn = confirmAnswer != null ? parseYesNo(confirmAnswer) : null;
+    if (yn == true) return value;
+    await speak('D\'accord, reprenons cette question.');
+  }
+}
 
 /// Execute une liste de champs de formulaire, un par un. Les champs deja
 /// renseignes (par exemple lors d'une tentative precedente interrompue)
@@ -99,43 +154,10 @@ Future<bool> runFormFields({
     if (existing != null && existing.isNotEmpty) {
       continue;
     }
-
-    String? finalValue;
-    while (finalValue == null) {
-      final rawAnswer = await askWithRetry(
-        speak: speak,
-        listen: listen,
-        question: field.question,
-      );
-      if (rawAnswer == null) {
-        return false;
-      }
-
-      final value = field.normalize != null
-          ? field.normalize!(rawAnswer)
-          : rawAnswer;
-
-      if (!field.confirmBack) {
-        finalValue = value;
-        break;
-      }
-
-      final confirmAnswer = await askWithRetry(
-        speak: speak,
-        listen: listen,
-        question: 'Vous avez dit : $value. Est-ce correct ? '
-            'Dites 1 pour oui, ou 2 pour non.',
-        maxRetries: 2,
-      );
-      final yn = confirmAnswer != null ? parseYesNo(confirmAnswer) : null;
-      if (yn == true) {
-        finalValue = value;
-      } else {
-        await speak('D\'accord, reprenons cette question.');
-      }
-    }
-
-    await OnboardingStorage.setField(field.key, finalValue);
+    final value =
+        await collectFieldValue(speak: speak, listen: listen, field: field);
+    if (value == null) return false;
+    await OnboardingStorage.setField(field.key, value);
   }
   return true;
 }

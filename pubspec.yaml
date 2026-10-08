@@ -19,6 +19,12 @@ dependencies:
   # --- Authentification biométrique (empreinte digitale) ---
   local_auth: ^2.3.0
 
+  # --- Connexion directe a la base de donnees Neon (Postgres) ---
+  postgres: ^3.4.5
+
+  # --- Stockage chiffre des identifiants de connexion propres a chaque client ---
+  flutter_secure_storage: ^9.2.2
+
   # --- Service d'arrière-plan permanent (écoute du mot-clé) ---
   flutter_background_service: ^5.0.10
   flutter_background_service_android: ^6.2.5

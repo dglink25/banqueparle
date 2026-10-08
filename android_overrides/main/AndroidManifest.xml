@@ -23,6 +23,9 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Appel direct du conseiller (touche 6) -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+
     <application
         android:label="BanqueParle"
         android:name="${applicationName}"
