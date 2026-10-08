@@ -239,6 +239,7 @@ New repository secret.
 | NEON_PROVISIONER_PASSWORD   | Mot de passe defini a l'etape 3             |
 | ADVISOR_PHONE               | Numero du centre de relation client (touche 6), au format international, par exemple +22990000000. Accepte aussi comme variable (Settings > Secrets and variables > Actions > Variables) |
 
+
 Sans ces secrets, l'APK se construit quand meme, mais l'application
 annonce a l'oral que la base de donnees n'est pas configuree et les
 virements sont desactives. Un avertissement apparait dans le journal du
