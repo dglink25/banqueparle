@@ -1,6 +1,9 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:postgres/postgres.dart';
 
+import '../utils/db_error.dart';
+import '../utils/onboarding_storage.dart';
+
 /// -----------------------------------------------------------------------
 /// TransferService
 ///
@@ -20,7 +23,7 @@ class TransferService {
 
   static const _neonHost = String.fromEnvironment('NEON_HOST');
   static const _neonDatabase =
-      String.fromEnvironment('NEON_DATABASE', defaultValue: 'banqueparle');
+      String.fromEnvironment('NEON_DATABASE', defaultValue: 'neondb');
 
   /// Ouvre une connexion avec le role du client, execute [action], puis
   /// referme toujours la connexion. Renvoie null si la base n'est pas
@@ -48,6 +51,12 @@ class TransferService {
     } finally {
       await conn.close();
     }
+  }
+
+  /// Memorise le detail technique de la derniere erreur (affiche a
+  /// l'ecran pour le diagnostic).
+  static Future<void> _record(Object e) async {
+    await OnboardingStorage.setLastDbError(describeDbError(e).detail);
   }
 
   static Future<TransferResult> transfer({
@@ -81,7 +90,8 @@ class TransferService {
         newBalance: balance,
       );
     } catch (e) {
-      return TransferResult(false, _mapError(e.toString()));
+      await _record(e);
+      return TransferResult(false, _mapError(e));
     }
   }
 
@@ -92,7 +102,8 @@ class TransferService {
             .execute('SELECT get_balance()::double precision AS b');
         return (result.first.toColumnMap()['b'] as num).toDouble();
       });
-    } catch (_) {
+    } catch (e) {
+      await _record(e);
       return null;
     }
   }
@@ -119,7 +130,8 @@ class TransferService {
           );
         }).toList();
       });
-    } catch (_) {
+    } catch (e) {
+      await _record(e);
       return null;
     }
   }
@@ -140,6 +152,7 @@ class TransferService {
       }
       return OtpResult(code, null);
     } catch (e) {
+      await _record(e);
       if (e.toString().contains('OTP_RATE_LIMIT')) {
         return OtpResult(
           null,
@@ -147,10 +160,7 @@ class TransferService {
           'demander un nouveau.',
         );
       }
-      return OtpResult(
-        null,
-        'Impossible de generer le code. Verifiez votre connexion internet.',
-      );
+      return OtpResult(null, describeDbError(e).spoken);
     }
   }
 
@@ -166,12 +176,14 @@ class TransferService {
         return true;
       });
       return ok ?? false;
-    } catch (_) {
+    } catch (e) {
+      await _record(e);
       return false;
     }
   }
 
-  static String _mapError(String raw) {
+  static String _mapError(Object error) {
+    final raw = error.toString();
     if (raw.contains('INSUFFICIENT_BALANCE')) {
       return 'Solde insuffisant pour effectuer ce virement.';
     }
@@ -184,8 +196,8 @@ class TransferService {
     if (raw.contains('INVALID_AMOUNT')) {
       return 'Le montant indique n\'est pas valide.';
     }
-    return 'Le virement a echoue. Verifiez votre connexion internet et '
-        'reessayez.';
+    // Erreur technique (reseau, base, identifiants) : dit la vraie cause.
+    return 'Le virement a echoue. ${describeDbError(error).spoken}';
   }
 }
 

@@ -178,24 +178,91 @@ Le seul identifiant present dans l'APK est celui du role
 
 ### Mise en place (une seule fois)
 
-1. Creer un projet Neon et une base nommee `banqueparle`.
-2. Dans l'editeur SQL de Neon, connecte avec le role proprietaire
-   (par defaut `neondb_owner`), executer le contenu de
-   `sql/schema.sql`.
-   Si une version precedente du script a deja ete executee, le
-   rejouer en entier : il est idempotent, et il corrige un defaut
-   des versions anterieures (les fonctions identifiaient l'appelant
-   avec `current_user`, qui designe le proprietaire de la fonction et non
-   le client connecte ; elles utilisent maintenant `session_user`). Sans
-   cette correction, tout virement ou toute lecture de solde echoue.
-3. Definir le mot de passe du role de provisionnement :
+Le script `sql/schema.sql` doit etre execute dans Neon : il cree les
+tables, les fonctions et le role de provisionnement. Tant qu'il n'a pas
+ete execute, l'application ne peut pas se connecter (le role n'existe
+pas). GitHub n'execute rien dans la base : c'est une etape manuelle.
 
-       ALTER ROLE banqueparle_provisioner PASSWORD 'un-mot-de-passe-long-et-aleatoire';
+**Etape 1 - Executer le script SQL**
 
-4. Relever l'hote de connexion directe (sans `-pooler`) dans le
-   tableau de bord Neon, par exemple
-   `ep-nom-123456.eu-central-1.aws.neon.tech`.
-5. Renseigner les secrets GitHub (section 4).
+1. Ouvrir la console Neon, le projet, la branche `production`.
+2. Ouvrir l'editeur SQL (menu de gauche, dans "Base de donnees
+   Postgres" : "Editeur SQL" / "SQL Editor").
+3. En haut de l'editeur, verifier que la base est `neondb` et le role
+   `neondb_owner` (valeurs par defaut).
+4. Ouvrir `sql/schema.sql` dans GitHub, cliquer sur "Raw", tout
+   selectionner et copier.
+5. Coller dans l'editeur SQL, puis cliquer sur "Run".
+6. Un message de succes doit apparaitre. En cas d'erreur, relever le
+   texte et la ligne indiques.
+
+Le script est rejouable : en cas de doute, ou apres une mise a jour du
+fichier, il peut etre execute de nouveau en entier sans rien casser.
+Il est indispensable de le rejouer si une version anterieure a ete
+executee : elle contenait un defaut (`current_user` au lieu de
+`session_user`) qui faisait echouer tout virement et toute lecture de
+solde.
+
+**Etape 2 - Definir le mot de passe du role de provisionnement**
+
+Dans le meme editeur, executer (en remplacant par un mot de passe long
+et aleatoire, sans apostrophe) :
+
+    ALTER ROLE banqueparle_provisioner PASSWORD 'un-mot-de-passe-long-et-aleatoire';
+
+**Etape 3 - Verifier l'installation**
+
+    SELECT rolname FROM pg_roles
+    WHERE rolname IN ('customer_base', 'banqueparle_provisioner', 'banqueparle_otp_verifier');
+
+    SELECT proname FROM pg_proc
+    WHERE proname IN ('create_customer_role', 'transfer_funds',
+                      'get_balance', 'get_history', 'generate_otp',
+                      'verify_otp', 'update_owner_name');
+
+La premiere requete doit renvoyer 3 lignes, la seconde 7.
+
+**Etape 4 - Renseigner les secrets GitHub (section 4)**
+
+ATTENTION : le role a mettre dans `NEON_PROVISIONER_USER` est
+`banqueparle_provisioner`, avec le mot de passe de l'etape 2. Ne jamais
+y mettre `neondb_owner` ni le mot de passe affiche dans la fenetre
+"Connecter" de Neon : ce sont ceux du proprietaire de la base, et tout ce
+qui est dans l'APK peut etre extrait par quiconque le telecharge. Le
+workflow refuse de construire l'APK si le role ressemble a un role
+administrateur.
+
+Pour `NEON_HOST`, utiliser l'hote **direct** : dans la fenetre
+"Connecter" de Neon, desactiver "Mise en commun des connexions"
+(pooling), puis copier uniquement le nom d'hote, par exemple
+`ep-nom-123456.us-east-2.aws.neon.tech` : sans `postgresql://`, sans
+identifiants, sans port, sans `/neondb`. Un hote contenant `-pooler`
+fonctionne parfois mais n'est pas recommande ici.
+
+`NEON_DATABASE` vaut `neondb` par defaut : il n'est necessaire que si la
+base porte un autre nom.
+
+**Etape 5 - Reconstruire l'APK**
+
+Les secrets sont integres a la compilation. Apres toute modification
+d'un secret, relancer le workflow (onglet Actions, "Build APK
+BanqueParle", "Run workflow", ou un nouveau push), puis reinstaller
+l'APK.
+
+### Si l'application annonce une erreur de base de donnees
+
+L'application dit maintenant la cause, et affiche en petit le texte
+technique ("Derniere erreur base") sous le titre.
+
+| Ce que dit l'application                     | Cause                                   | Solution |
+|----------------------------------------------|-----------------------------------------|----------|
+| base de donnees introuvable                  | Nom de base incorrect                   | Definir `NEON_DATABASE` (par defaut `neondb`), reconstruire |
+| script SQL non installe                      | `schema.sql` pas execute                | Etape 1 |
+| identifiants refuses                         | Role absent ou mot de passe different   | Etapes 1 et 2, puis secrets identiques, reconstruire |
+| droits insuffisants                          | Ancienne version du script              | Rejouer `schema.sql` |
+| adresse du serveur introuvable               | `NEON_HOST` faux, ou pas d'internet     | Hote seul, sans `postgresql://` |
+| serveur n'a pas identifie le projet          | Neon ne reconnait pas la connexion      | Utiliser l'hote direct ; si persistant, me communiquer l'erreur affichee |
+| impossible de joindre la banque              | Pas de connexion internet               | Verifier le reseau du telephone |
 
 ### Tester un virement
 
@@ -234,11 +301,10 @@ New repository secret.
 | Secret                      | Valeur                                      |
 |-----------------------------|---------------------------------------------|
 | NEON_HOST                   | Hote direct Neon (sans -pooler)             |
-| NEON_DATABASE               | Nom de la base (optionnel, defaut banqueparle) |
+| NEON_DATABASE               | Nom de la base (optionnel, defaut neondb)   |
 | NEON_PROVISIONER_USER       | `banqueparle_provisioner`                   |
 | NEON_PROVISIONER_PASSWORD   | Mot de passe defini a l'etape 3             |
 | ADVISOR_PHONE               | Numero du centre de relation client (touche 6), au format international, par exemple +22990000000. Accepte aussi comme variable (Settings > Secrets and variables > Actions > Variables) |
-
 
 Sans ces secrets, l'APK se construit quand meme, mais l'application
 annonce a l'oral que la base de donnees n'est pas configuree et les
@@ -357,6 +423,18 @@ travaille sur une donnee perimee.
   service de reconnaissance vocale Google, avec la langue francaise
   telechargee pour un usage hors ligne, resout le probleme sur tous
   les appareils qui l'acceptent.
+- Reponses "1 pour oui, 2 pour non" : le moteur vocal Android reconnait
+  mal les chiffres dits seuls (il renvoie parfois "hein" pour un, "de"
+  pour deux), alors que "oui" et "non" sont bien reconnus. L'application
+  accepte ces approximations quand elles constituent la reponse entiere,
+  et, si une reponse n'est pas comprise, elle redemande avec la consigne
+  "dites simplement oui, ou non" au lieu de la prendre pour un refus. Une
+  reponse ambigue (oui et non dans la meme phrase) est aussi redemandee.
+  Pour un virement, l'absence de reponse claire apres trois essais
+  annule l'operation : une reponse non comprise n'est jamais prise pour
+  un accord. L'ecran affiche "Derniere phrase entendue" : c'est le texte
+  exact renvoye par le moteur vocal, utile pour diagnostiquer un probleme
+  de reconnaissance sur un telephone donne.
 - Certains telephones emettent un court bip systeme a chaque
   redemarrage de l'ecoute. C'est un comportement du moteur vocal
   Android, non modifiable par l'application.

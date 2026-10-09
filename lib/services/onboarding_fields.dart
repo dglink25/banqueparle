@@ -124,16 +124,15 @@ Future<String?> collectFieldValue({
         ? value.split('').join(' ')
         : value;
 
-    final confirmAnswer = await askWithRetry(
+    final confirmed = await askYesNo(
       speak: speak,
       listen: listen,
-      question: 'Vous avez dit : $spoken. Est-ce correct ? '
-          'Dites 1 pour oui, ou 2 pour non.',
-      maxRetries: 2,
+      question: 'Vous avez dit : $spoken. Est-ce correct ?',
     );
-    final yn = confirmAnswer != null ? parseYesNo(confirmAnswer) : null;
-    if (yn == true) return value;
-    await speak('D\'accord, reprenons cette question.');
+    if (confirmed == true) return value;
+    await speak(confirmed == false
+        ? 'D\'accord, reprenons cette question.'
+        : 'Je n\'ai pas pu confirmer. Reprenons cette question.');
   }
 }
 

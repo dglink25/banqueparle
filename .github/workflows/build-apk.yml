@@ -114,9 +114,35 @@ jobs:
         run: |
           if [ -z "$NEON_HOST" ] || [ -z "$NEON_PROVISIONER_USER" ] || [ -z "$NEON_PROVISIONER_PASSWORD" ]; then
             echo "::warning::Secrets Neon absents : les virements seront desactives dans cet APK. Voir README, section Base de donnees."
-          else
-            echo "Secrets Neon presents."
+            exit 0
           fi
+
+          USER_LC="$(echo "$NEON_PROVISIONER_USER" | tr '[:upper:]' '[:lower:]')"
+
+          # SECURITE : l'APK est telechargeable publiquement et tout ce qu'il
+          # contient peut etre extrait. Il ne doit JAMAIS embarquer un
+          # identifiant administrateur de la base.
+          case "$USER_LC" in
+            *owner*|postgres|neon_superuser|*admin*|*superuser*)
+              echo "::error::NEON_PROVISIONER_USER ('$NEON_PROVISIONER_USER') ressemble a un role administrateur. Le build est arrete pour ne pas publier un APK contenant un acces complet a la base. Utilisez le role banqueparle_provisioner (voir README, section 3)."
+              exit 1
+              ;;
+          esac
+
+          # NEON_HOST doit etre un nom d'hote seul, pas une URL.
+          case "$NEON_HOST" in
+            *://*|*@*|*/*|*:*)
+              echo "::error::NEON_HOST doit contenir uniquement le nom d'hote (par exemple ep-nom-123456.us-east-2.aws.neon.tech), sans postgresql://, identifiants, port ni chemin."
+              exit 1
+              ;;
+          esac
+
+          case "$NEON_HOST" in
+            *-pooler*)
+              echo "::warning::NEON_HOST pointe vers le pooler de connexions (-pooler). Preferez l'hote direct : desactivez 'Mise en commun des connexions' dans la fenetre Connecter de Neon, puis copiez l'hote affiche."
+              ;;
+          esac
+          echo "Secrets Neon presents et plausibles."
 
       # 11. Construit l'APK en mode release. Les parametres de connexion
       #     sont injectes a la compilation (--dart-define) depuis les
@@ -131,7 +157,7 @@ jobs:
           # telephone n'est pas un secret : variable ou secret, au choix.
           ADVISOR_PHONE: ${{ vars.ADVISOR_PHONE || secrets.ADVISOR_PHONE }}
         run: |
-          DB_NAME="${NEON_DATABASE:-banqueparle}"
+          DB_NAME="${NEON_DATABASE:-neondb}"
           if [ -z "$ADVISOR_PHONE" ]; then
             echo "::warning::ADVISOR_PHONE absent : la touche 6 (conseiller) annoncera que le numero n'est pas configure."
           fi

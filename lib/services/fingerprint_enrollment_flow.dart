@@ -70,17 +70,13 @@ class FingerprintEnrollmentFlow {
           break;
         }
 
-        final wantsMore = await askWithRetry(
+        final wantsMore = await askYesNo(
           speak: speak,
           listen: listen,
-          question:
-              'Voulez-vous ajouter une autre empreinte ? Dites 1 pour oui, '
-              'ou 2 pour non.',
-          maxRetries: 2,
+          question: 'Voulez-vous ajouter une autre empreinte ?',
+          maxAttempts: 3,
         );
-
-        final yesNo = wantsMore != null ? parseYesNo(wantsMore) : null;
-        if (yesNo != true) {
+        if (wantsMore != true) {
           break;
         }
       } else {

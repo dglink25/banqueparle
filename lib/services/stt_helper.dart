@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+
+import '../utils/onboarding_storage.dart';
 
 /// Écoute une seule fois et renvoie le texte reconnu, ou null si rien n'a
 /// été entendu (silence). Utilisée à la fois par le service d'arrière-plan
@@ -51,5 +54,8 @@ Future<String?> sttListenOnce(
     await speech.stop();
   }
 
-  return lastWords.trim().isNotEmpty ? lastWords.trim() : null;
+  final heard = lastWords.trim();
+  debugPrint('[STT] entendu : "$heard"');
+  unawaited(OnboardingStorage.setLastHeard(heard.isEmpty ? '(silence)' : heard));
+  return heard.isNotEmpty ? heard : null;
 }

@@ -27,15 +27,16 @@ class TransferFlow {
     final amount = await _collectAmount();
     if (amount == null) return _cancelled();
 
-    final recap = await askWithRetry(
+    // Une reponse non comprise n'est JAMAIS prise pour un "oui" : apres
+    // plusieurs essais sans reponse claire, le virement est annule.
+    final confirmed = await askYesNo(
       speak: speak,
       listen: listen,
       question: 'Vous allez envoyer ${speakAmount(amount)} vers le compte '
-          '${_spellDigits(toAccount)}. Confirmez-vous ce virement ? '
-          'Dites 1 pour oui, ou 2 pour non.',
-      maxRetries: 1,
+          '${_spellDigits(toAccount)}. Confirmez-vous ce virement ?',
+      maxAttempts: 3,
     );
-    if (recap == null || parseYesNo(recap) != true) {
+    if (confirmed != true) {
       await speak('Virement annule.');
       return;
     }
@@ -95,15 +96,13 @@ class TransferFlow {
         continue;
       }
 
-      final confirmRaw = await askWithRetry(
+      final ok = await askYesNo(
         speak: speak,
         listen: listen,
         question: 'Vous avez dit le compte ${_spellDigits(candidate)}. '
-            'Est-ce correct ? Dites 1 pour oui, ou 2 pour non.',
-        maxRetries: 2,
+            'Est-ce correct ?',
       );
-      final yn = confirmRaw != null ? parseYesNo(confirmRaw) : null;
-      if (yn == true) return candidate;
+      if (ok == true) return candidate;
     }
     return null;
   }
@@ -124,15 +123,12 @@ class TransferFlow {
         continue;
       }
 
-      final confirmRaw = await askWithRetry(
+      final ok = await askYesNo(
         speak: speak,
         listen: listen,
-        question: 'Vous avez dit ${speakAmount(amount)}. Est-ce correct ? '
-            'Dites 1 pour oui, ou 2 pour non.',
-        maxRetries: 2,
+        question: 'Vous avez dit ${speakAmount(amount)}. Est-ce correct ?',
       );
-      final yn = confirmRaw != null ? parseYesNo(confirmRaw) : null;
-      if (yn == true) return amount;
+      if (ok == true) return amount;
     }
     return null;
   }

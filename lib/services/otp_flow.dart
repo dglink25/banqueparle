@@ -33,13 +33,15 @@ class OtpFlow {
     );
 
     for (var i = 0; i < kMaxRepeats; i++) {
-      final answer = await askWithRetry(
+      final repeat = await askYesNo(
         speak: speak,
         listen: listen,
-        question: 'Dites 1 pour repeter le code, ou 2 pour terminer.',
-        maxRetries: 1,
+        question: 'Souhaitez-vous que je repete le code ?',
+        hint: 'Dites 1 pour repeter, ou 2 pour terminer.',
+        simpleHint: 'Dites simplement oui pour repeter, ou non pour terminer.',
+        maxAttempts: 2,
       );
-      if (answer == null || parseYesNo(answer) != true) return;
+      if (repeat != true) return;
       await speak('Je repete : $spelled.');
     }
   }

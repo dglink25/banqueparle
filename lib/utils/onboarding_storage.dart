@@ -13,6 +13,8 @@ class OnboardingStorage {
   static const _kFingerprintCount = 'fingerprint_enrolled_count';
   static const _kPinHash = 'security_pin_hash';
   static const _kFlowInProgress = 'flow_in_progress_at_ms';
+  static const _kLastHeard = 'last_heard_text';
+  static const _kLastDbError = 'last_db_error';
   static const _kAccountProvisioned = 'account_provisioned';
   static const _kPendingAction = 'pending_action';
   static const _kLastBackgroundSpeechAt = 'last_background_speech_at_ms';
@@ -176,6 +178,35 @@ class OnboardingStorage {
     return diff <= within.inMilliseconds;
   }
 
+  /// Derniere phrase renvoyee par la reconnaissance vocale. Sert au
+  /// diagnostic : affichee a l'ecran pour voir exactement ce que le moteur
+  /// a compris, y compris depuis le service d'arriere-plan.
+  static Future<void> setLastHeard(String text) async {
+    final p = await _prefs();
+    await p.setString(_kLastHeard, text);
+  }
+
+  static Future<String> getLastHeard() async {
+    final p = await _prefs();
+    return p.getString(_kLastHeard) ?? '';
+  }
+
+  /// Derniere erreur de connexion a la base (texte technique), pour le
+  /// diagnostic a l'ecran.
+  static Future<void> setLastDbError(String text) async {
+    final p = await _prefs();
+    if (text.isEmpty) {
+      await p.remove(_kLastDbError);
+    } else {
+      await p.setString(_kLastDbError, text);
+    }
+  }
+
+  static Future<String> getLastDbError() async {
+    final p = await _prefs();
+    return p.getString(_kLastDbError) ?? '';
+  }
+
   static Future<void> resetAll() async {
     final p = await _prefs();
     final keys = p.getKeys().where((k) =>
@@ -186,6 +217,8 @@ class OnboardingStorage {
         k == _kFingerprintCount ||
         k == _kPinHash ||
         k == _kFlowInProgress ||
+        k == _kLastHeard ||
+        k == _kLastDbError ||
         k == _kAccountProvisioned ||
         k == _kPendingAction ||
         k == _kLastBackgroundSpeechAt ||

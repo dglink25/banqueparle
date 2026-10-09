@@ -36,6 +36,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   StreamSubscription? _wakeSub;
   StreamSubscription? _quitSub;
+  Timer? _heardTimer;
+  String _lastHeard = '';
+  String _lastDbError = '';
   _ScreenState _state = _ScreenState.idle;
   BankIntent _activeIntent = BankIntent.none;
   bool _enrolled = false;
@@ -73,11 +76,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _closeSession(announce: false);
     });
 
+    // Diagnostic : relit regulierement la derniere phrase entendue (ecrite
+    // aussi par le service d'arriere-plan, d'ou la relecture du disque).
+    _heardTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      final heard = await OnboardingStorage.getLastHeard();
+      final dbError = await OnboardingStorage.getLastDbError();
+      if (mounted && (heard != _lastHeard || dbError != _lastDbError)) {
+        setState(() {
+          _lastHeard = heard;
+          _lastDbError = dbError;
+        });
+      }
+    });
+
     _checkPendingSteps(isColdStart: true);
   }
 
   @override
   void dispose() {
+    _heardTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _wakeSub?.cancel();
     _quitSub?.cancel();
@@ -485,6 +502,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppColors.blue, fontSize: 15),
               ),
+              if (_lastHeard.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Derniere phrase entendue : "$_lastHeard"',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.blue, fontSize: 12),
+                ),
+              ],
+              if (_lastDbError.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Derniere erreur base : $_lastDbError',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.blue, fontSize: 12),
+                ),
+              ],
               const SizedBox(height: 16),
               _MicIndicator(active: busy),
               const SizedBox(height: 16),

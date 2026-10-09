@@ -1,6 +1,9 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:postgres/postgres.dart';
 
+import '../utils/db_error.dart';
+import '../utils/onboarding_storage.dart';
+
 /// -----------------------------------------------------------------------
 /// AccountProvisioningService
 ///
@@ -19,7 +22,7 @@ class AccountProvisioningService {
 
   static const _neonHost = String.fromEnvironment('NEON_HOST');
   static const _neonDatabase =
-      String.fromEnvironment('NEON_DATABASE', defaultValue: 'banqueparle');
+      String.fromEnvironment('NEON_DATABASE', defaultValue: 'neondb');
   static const _provisionerUser =
       String.fromEnvironment('NEON_PROVISIONER_USER');
   static const _provisionerPassword =
@@ -74,6 +77,7 @@ class AccountProvisioningService {
       await _storage.write(key: 'db_role_name', value: roleName);
       await _storage.write(key: 'db_role_password', value: password);
 
+      await OnboardingStorage.setLastDbError('');
       return ProvisioningResult(true, 'Compte bancaire active avec succes.');
     } catch (e) {
       final msg = e.toString();
@@ -83,11 +87,11 @@ class AccountProvisioningService {
           'Ce numero de compte est deja enregistre.',
         );
       }
-      return ProvisioningResult(
-        false,
-        'Impossible de contacter la banque. Verifiez votre connexion '
-        'internet et reessayez.',
-      );
+      // Dit la vraie cause (base introuvable, script non execute,
+      // identifiants refuses, reseau...) au lieu d'un message unique.
+      final info = describeDbError(e);
+      await OnboardingStorage.setLastDbError(info.detail);
+      return ProvisioningResult(false, info.spoken);
     } finally {
       await conn?.close();
     }
