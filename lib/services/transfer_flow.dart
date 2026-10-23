@@ -35,6 +35,7 @@ class TransferFlow {
       question: 'Vous allez envoyer ${speakAmount(amount)} vers le compte '
           '${_spellDigits(toAccount)}. Confirmez-vous ce virement ?',
       maxAttempts: 3,
+      strictYes: true,
     );
     if (confirmed != true) {
       await speak('Virement annule.');
@@ -101,6 +102,7 @@ class TransferFlow {
         listen: listen,
         question: 'Vous avez dit le compte ${_spellDigits(candidate)}. '
             'Est-ce correct ?',
+        strictYes: true,
       );
       if (ok == true) return candidate;
     }
@@ -127,6 +129,7 @@ class TransferFlow {
         speak: speak,
         listen: listen,
         question: 'Vous avez dit ${speakAmount(amount)}. Est-ce correct ?',
+        strictYes: true,
       );
       if (ok == true) return amount;
     }

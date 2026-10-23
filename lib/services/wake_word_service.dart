@@ -12,6 +12,7 @@ import '../utils/onboarding_storage.dart';
 import '../utils/text_normalize.dart';
 import 'command_intent.dart';
 import 'onboarding_fields.dart';
+import 'stop_command.dart';
 import 'stt_helper.dart';
 import 'voice_dialog.dart';
 
@@ -138,14 +139,20 @@ void onServiceStart(ServiceInstance service) async {
   await tts.setVolume(1.0);
   Future<void> speak(String text) async {
     await tts.stop();
-    await tts.speak(text);
-    // Attend la fin de la lecture pour ne pas enchaîner les phrases.
+    // Les gestionnaires de fin sont poses AVANT de lancer la synthese :
+    // sinon une fin de lecture rapide pouvait etre manquee, et l'ecoute
+    // demarrait alors en pleine parole de l'application.
     final completer = Completer<void>();
-    tts.setCompletionHandler(() {
+    void done() {
       if (!completer.isCompleted) completer.complete();
-    });
+    }
+
+    tts.setCompletionHandler(done);
+    tts.setCancelHandler(done);
+    tts.setErrorHandler((_) => done());
+    await tts.speak(text);
     await completer.future.timeout(
-      const Duration(seconds: 20),
+      const Duration(seconds: 25),
       onTimeout: () {},
     );
   }
@@ -174,116 +181,175 @@ void onServiceStart(ServiceInstance service) async {
     return;
   }
 
-  bool handlingWakeWord = false; // évite les déclenchements concurrents
+  bool handlingWakeWord = false; // evite les declenchements concurrents
 
-  Future<void> handleWakeWordDetected() async {
+  // Capture de la phrase complete apres le mot-cle ("Banque Parlante
+  // solde"). Des que le mot-cle apparait, on laisse un court delai
+  // d'ecoute supplementaire pour recevoir la suite de la phrase, au lieu
+  // de couper aussitot comme avant (la demande dite dans la meme phrase
+  // etait perdue).
+  Timer? graceTimer;
+  String wakeText = '';
+  bool wakeArmed = false;
+
+  /// Demande confirmation de l'arret. Sans reponse claire, l'arret est
+  /// execute : l'utilisateur l'a demande, et il peut s'agir d'une urgence.
+  Future<bool> confirmStop() async {
+    final answer = await askYesNo(
+      speak: speak,
+      listen: () => sttListenOnce(speech),
+      question: kStopConfirmQuestion,
+      maxAttempts: 3,
+    );
+    return answer != false;
+  }
+
+  Future<void> handleOnce(String utterance) async {
+    // "Banque Parlante stop" / "Banque Parlante zero" dit d'emblee.
+    if (isStopCommand(utterance)) throw const StopRequested();
+
+    // Toute reponse passe par interceptStop : dire "stop" ou "zero" a
+    // n'importe quelle question coupe l'activite au lieu d'etre pris
+    // pour un nom, un numero ou une commande.
+    final listenFn = interceptStop(() => sttListenOnce(speech));
+
+    final completed = await OnboardingStorage.isCompleted();
+
+    if (!completed) {
+      final personalDone = await _fieldsAllPresent(kPersonalInfoFields);
+      final bankDone = await _fieldsAllPresent(kBankAccountFields);
+      final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
+      final needsPin = await OnboardingStorage.needsPinStep();
+
+      if (!personalDone || !bankDone) {
+        await speak(
+          'Bienvenue sur Banque Parlante. Avant de commencer, '
+          'j\'ai besoin de quelques informations pour ouvrir votre '
+          'profil.',
+        );
+        await OnboardingStorage.markBackgroundSpeech();
+
+        final personalOk = personalDone ||
+            await runFormFields(
+              speak: speak,
+              listen: listenFn,
+              fields: kPersonalInfoFields,
+            );
+
+        final bankOk = personalOk &&
+            (bankDone ||
+                await runFormFields(
+                  speak: speak,
+                  listen: listenFn,
+                  fields: kBankAccountFields,
+                ));
+
+        if (personalOk && bankOk) {
+          await OnboardingStorage.setNeedsFingerprintStep(true);
+          await OnboardingStorage.setNeedsPinStep(true);
+          await speak(
+            'Merci. Pour finaliser votre inscription, ouvrez votre '
+            'telephone : nous allons configurer la securite de votre '
+            'compte, empreinte digitale puis code secret.',
+          );
+          await OnboardingStorage.markBackgroundSpeech();
+          await _triggerAppWakeUp(flnp, service);
+        } else {
+          await speak(
+            'Je n\'ai pas reussi a vous entendre. Redites '
+            '"Banque Parlante" quand vous serez pret a continuer.',
+          );
+          await OnboardingStorage.markBackgroundSpeech();
+        }
+      } else if (needsFingerprint || needsPin) {
+        await speak(
+          'Il reste a finaliser la securite de votre compte. '
+          'Merci d\'ouvrir votre telephone.',
+        );
+        await OnboardingStorage.markBackgroundSpeech();
+        await _triggerAppWakeUp(flnp, service);
+      }
+      return;
+    }
+
+    // --- Utilisation normale (enrolement termine) ---
+    // La demande peut avoir ete dite dans la meme phrase que le mot-cle
+    // ("Banque Parlante solde") : on la traite sans reposer la question.
+    final remainder = stripWakeWord(utterance);
+    var intent = remainder.isNotEmpty ? detectIntent(remainder) : BankIntent.none;
+    String? command;
+
+    if (intent == BankIntent.none) {
+      final name = await OnboardingStorage.getField('full_name');
+      await speak((name != null && name.isNotEmpty)
+          ? 'Bienvenue $name.'
+          : 'Bienvenue sur Banque Parlante.');
+      await OnboardingStorage.markBackgroundSpeech();
+
+      command = await askWithRetry(
+        speak: speak,
+        listen: listenFn,
+        question: kMenuQuestion,
+        retryQuestion: kMenuRetryQuestion,
+        maxRetries: 1,
+        shortAnswer: true,
+      );
+      if (command != null) intent = detectIntent(command);
+    }
+
+    if (intent == BankIntent.quit) {
+      // "Quitter" suit la meme confirmation que l'arret d'urgence.
+      throw const StopRequested();
+    }
+
+    if (intent != BankIntent.none) {
+      // Toutes les operations bancaires (reseau, biometrie) s'executent au
+      // premier plan : on enregistre l'action, puis on reveille l'ecran.
+      await OnboardingStorage.setPendingAction(intent.name);
+      await speak('D\'accord : ${intentLabel(intent)}. Ouvrez votre '
+          'telephone si l\'ecran ne s\'allume pas.');
+      await OnboardingStorage.markBackgroundSpeech();
+      await _triggerAppWakeUp(flnp, service);
+    } else if (command != null) {
+      await speak('Je n\'ai pas compris cette demande. Redites '
+          '"Banque Parlante" pour recommencer.');
+      await OnboardingStorage.markBackgroundSpeech();
+    } else {
+      await speak('Je n\'ai pas entendu votre demande. Redites '
+          '"Banque Parlante" pour recommencer.');
+      await OnboardingStorage.markBackgroundSpeech();
+    }
+  }
+
+  Future<void> handleWakeWordDetected(String utterance) async {
     if (handlingWakeWord) return;
     handlingWakeWord = true;
     try {
       await speech.stop();
 
-      // Si l'interface est deja en train de traiter le formulaire ou la
-      // securite, ne pas parler par-dessus : cela causait un
-      // chevauchement audio et une ecoute concurrente contradictoire.
+      // Si l'interface traite deja un flux, ne pas parler par-dessus :
+      // chevauchement audio et ecoutes concurrentes.
       if (await OnboardingStorage.isFlowInProgress()) {
         debugPrint('[WakeWord] Flux deja en cours au premier plan, ignore.');
         return;
       }
 
-      final completed = await OnboardingStorage.isCompleted();
-
-      if (!completed) {
-        final personalDone = await _fieldsAllPresent(kPersonalInfoFields);
-        final bankDone = await _fieldsAllPresent(kBankAccountFields);
-        final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
-        final needsPin = await OnboardingStorage.needsPinStep();
-
-        if (!personalDone || !bankDone) {
-          await speak(
-            'Bienvenue sur Banque Parlante. Avant de commencer, '
-            'j\'ai besoin de quelques informations pour ouvrir votre '
-            'profil.',
-          );
-          await OnboardingStorage.markBackgroundSpeech();
-
-          final listenFn = () => sttListenOnce(speech);
-
-          final personalOk = personalDone ||
-              await runFormFields(
-                speak: speak,
-                listen: listenFn,
-                fields: kPersonalInfoFields,
-              );
-
-          final bankOk = personalOk &&
-              (bankDone ||
-                  await runFormFields(
-                    speak: speak,
-                    listen: listenFn,
-                    fields: kBankAccountFields,
-                  ));
-
-          if (personalOk && bankOk) {
-            await OnboardingStorage.setNeedsFingerprintStep(true);
-            await OnboardingStorage.setNeedsPinStep(true);
-            await speak(
-              'Merci. Pour finaliser votre inscription, ouvrez votre '
-              'telephone : nous allons configurer la securite de votre '
-              'compte, empreinte digitale puis code secret.',
-            );
+      var request = utterance;
+      while (true) {
+        try {
+          await handleOnce(request);
+          break;
+        } on StopRequested {
+          if (await confirmStop()) {
+            await speak(kStoppedMessage);
             await OnboardingStorage.markBackgroundSpeech();
-            await _triggerAppWakeUp(flnp, service);
-          } else {
-            await speak(
-              'Je n\'ai pas reussi a vous entendre. Redites '
-              '"Banque Parlante" quand vous serez pret a continuer.',
-            );
-            await OnboardingStorage.markBackgroundSpeech();
+            // L'application revient en arriere-plan ; le service continue
+            // d'ecouter le mot-cle pour la relancer.
+            service.invoke('quit_requested');
+            break;
           }
-        } else if (needsFingerprint || needsPin) {
-          await speak(
-            'Il reste a finaliser la securite de votre compte. '
-            'Merci d\'ouvrir votre telephone.',
-          );
-          await OnboardingStorage.markBackgroundSpeech();
-          await _triggerAppWakeUp(flnp, service);
-        }
-      } else {
-        // --- Utilisation normale (enrolement deja termine) ---
-        final name = await OnboardingStorage.getField('full_name');
-        final greeting = (name != null && name.isNotEmpty)
-            ? 'Bienvenue $name.'
-            : 'Bienvenue sur Banque Parlante.';
-        await speak(greeting);
-        await OnboardingStorage.markBackgroundSpeech();
-
-        // Ecoute la commande. Toutes les operations bancaires (reseau,
-        // biometrie) s'executent au premier plan : le service enregistre
-        // l'action demandee, puis reveille l'interface qui la traite.
-        // Seule la commande "quitter" se traite ici, sans interface.
-        final command = await askWithRetry(
-          speak: speak,
-          listen: () => sttListenOnce(speech),
-          question: kMenuQuestion,
-          maxRetries: 1,
-        );
-        final intent =
-            command != null ? detectIntent(command) : BankIntent.none;
-
-        if (intent == BankIntent.quit) {
-          await speak('Session fermee. Au revoir.');
-          await OnboardingStorage.markBackgroundSpeech();
-          service.invoke('quit_requested');
-        } else if (intent != BankIntent.none) {
-          await OnboardingStorage.setPendingAction(intent.name);
-          await speak('Tres bien. Ouvrez votre telephone si l\'ecran ne '
-              's\'allume pas.');
-          await OnboardingStorage.markBackgroundSpeech();
-          await _triggerAppWakeUp(flnp, service);
-        } else if (command != null) {
-          await speak('Je n\'ai pas compris cette commande. Redites '
-              '"Banque Parlante" pour recommencer.');
-          await OnboardingStorage.markBackgroundSpeech();
+          await speak('D\'accord, on reprend.');
+          request = '';
         }
       }
     } catch (e) {
@@ -293,24 +359,51 @@ void onServiceStart(ServiceInstance service) async {
     }
   }
 
+  void fireWake() {
+    graceTimer?.cancel();
+    if (!wakeArmed) return;
+    wakeArmed = false;
+    final heard = wakeText;
+    wakeText = '';
+    unawaited(() async {
+      // Un resultat tardif de la meme session peut arriver pendant que la
+      // conversation est deja en cours : ne surtout pas couper l'ecoute
+      // de la reponse de l'utilisateur.
+      if (handlingWakeWord) return;
+      try {
+        await speech.stop();
+      } catch (_) {}
+      await handleWakeWordDetected(heard);
+    }());
+  }
+
   Future<void> listenLoop() async {
     while (true) {
       // Le micro ne peut servir qu'a une seule reconnaissance a la fois :
       // pendant qu'un flux vocal tourne au premier plan, le service
-      // laisse la main (sinon les deux ecoutes se perturbent).
+      // laisse la main (sinon les deux ecoutes se perturbent). Jamais
+      // pendant sa propre conversation : ce serait couper la reponse
+      // que l'utilisateur est en train de donner.
       final foregroundBusy = await OnboardingStorage.isFlowInProgress();
-      if (foregroundBusy && speech.isListening) {
+      if (foregroundBusy && speech.isListening && !handlingWakeWord) {
         await speech.stop();
       }
       if (!speech.isListening && !handlingWakeWord && !foregroundBusy) {
         try {
           await speech.listen(
-            onResult: (result) async {
+            onResult: (result) {
+              if (handlingWakeWord) return;
               final text = result.recognizedWords;
-              if (containsWakeWord(text)) {
-                debugPrint('[WakeWord] Mot-cle detecte.');
-                await speech.stop();
-                await handleWakeWordDetected();
+              if (!wakeArmed && !containsWakeWord(text)) return;
+
+              wakeArmed = true;
+              wakeText = text;
+              graceTimer?.cancel();
+              if (result.finalResult) {
+                fireWake();
+              } else {
+                graceTimer =
+                    Timer(const Duration(milliseconds: 1100), fireWake);
               }
             },
             listenFor: const Duration(seconds: 55),
@@ -320,10 +413,10 @@ void onServiceStart(ServiceInstance service) async {
             listenMode: stt.ListenMode.confirmation,
           );
         } catch (e) {
-          debugPrint('[WakeWord] Erreur pendant l\'écoute: $e');
+          debugPrint('[WakeWord] Erreur pendant l\'ecoute: $e');
         }
       }
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(milliseconds: 500));
     }
   }
 

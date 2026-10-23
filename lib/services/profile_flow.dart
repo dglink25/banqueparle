@@ -41,11 +41,12 @@ class ProfileFlow {
         question: i == 0
             ? 'Souhaitez-vous modifier une information ? Dites 1 pour le '
                 'nom, 2 pour le telephone, 3 pour la date de naissance, '
-                '4 pour le code secret, ou 0 pour terminer.'
+                '4 pour le code secret, ou dites terminer.'
             : 'Une autre modification ? Dites 1 pour le nom, 2 pour le '
                 'telephone, 3 pour la date de naissance, 4 pour le code '
-                'secret, ou 0 pour terminer.',
+                'secret, ou dites terminer.',
         maxRetries: 1,
+        shortAnswer: true,
       );
       if (choice == null) return;
 
@@ -70,7 +71,7 @@ class ProfileFlow {
     if (has(['telephone', 'numero', 'portable'])) return 'phone_number';
     if (has(['date', 'naissance', 'anniversaire'])) return 'birth_date';
     if (has(['code', 'secret'])) return 'pin';
-    if (has(['terminer', 'fin', 'fini', 'rien', 'non', '0', 'zero'])) {
+    if (has(['terminer', 'fin', 'fini', 'rien', 'non'])) {
       return 'done';
     }
     if (has(['1', 'un', 'une'])) return 'full_name';

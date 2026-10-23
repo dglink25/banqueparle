@@ -137,7 +137,7 @@ sans avoir besoin de l'ecran. L'ecran n'est indispensable que pour
 l'etape de l'empreinte digitale (Android n'affiche l'invite biometrique
 que sur un ecran visible), donc pour toutes les fonctions protegees par
 l'empreinte : solde, historique, virement et code OTP. Le profil, le
-conseiller et "quitter" ne l'exigent pas. Verifier alors, dans l'ordre : etape B, etape C, puis
+conseiller et l'arret ne l'exigent pas. Verifier alors, dans l'ordre : etape B, etape C, puis
 Parametres > Applications > BanqueParle > Autorisations > Microphone sur
 "Autoriser tout le temps" si l'option existe.
 
@@ -337,8 +337,11 @@ interrompu, redire le mot-cle reprend a la question suivante.
 ### Les commandes (cahier des charges, section 3.1)
 
 Apres l'enrolement, chaque fonction est accessible de deux manieres :
-en disant "Banque Parlante" puis la demande (ou son numero), ou en
-appuyant sur la touche du pave numerique affiche a l'ecran. Un appui
+en disant "Banque Parlante" puis la demande (ou son numero), soit dans
+la meme phrase ("Banque Parlante solde", "Banque Parlante trois"), soit
+apres la question "Que souhaitez-vous faire ?", ou en appuyant sur la
+touche du pave numerique affiche a l'ecran. L'application annonce ce
+qu'elle a compris ("D'accord : consulter le solde") avant d'agir. Un appui
 sur une touche interrompt immediatement la voix, l'ecoute et l'invite
 d'empreinte en cours, puis lance la nouvelle commande.
 
@@ -350,7 +353,7 @@ d'empreinte en cours, puis lance la nouvelle commande.
 | 4      | Code OTP               | code, OTP, code temporaire                | Biometrie                |
 | 5      | Gestion du profil      | profil, modifier, parametres              | Optionnelle              |
 | 6      | Contacter un conseiller| conseiller, appeler, contacter            | Aucune                   |
-| 0      | Quitter                | quitter, fermer, au revoir                | Aucune                   |
+| 0      | Arreter                | stop, arrete, zero, quitter, au revoir    | Confirmation "1 ou 2"    |
 
 Details de chaque fonction :
 
@@ -381,11 +384,37 @@ Details de chaque fonction :
    fourni a la compilation (section 4). Si la permission d'appel a ete
    accordee, l'appel part seul ; sinon le numero est pre-compose dans le
    composeur.
-0. Quitter : coupe la voix, l'ecoute et toute invite en cours, ferme
-   l'ecran et laisse le service d'ecoute actif en arriere-plan.
-   L'application ne conserve aucun etat authentifie : chaque operation
-   sensible redemande l'identite, il n'y a donc pas de session a
-   invalider au-dela de cette fermeture.
+0. Arreter : voir "Arret d'urgence" ci-dessous.
+
+### Arret d'urgence
+
+A tout moment, "Banque Parlante arrete", "Banque Parlante stop", "stop",
+"arrete", "0" ou "zero" (ou la touche 0 de l'ecran) coupent l'activite
+en cours, puis l'application demande : "Vous etes sur de vouloir arreter
+Banque Parlante ? Dites 1 pour oui, ou 2 pour non."
+
+- Oui : l'application annonce "Banque Parlante est arrete" et se ferme
+  en arriere-plan. L'ecoute du mot-cle continue : dire "Banque
+  Parlante" la relance.
+- Non : "D'accord, on reprend", et l'activite repart depuis le debut de
+  son parcours (les champs deja enregistres a l'enrolement ne sont pas
+  redemandes).
+- Sans reponse claire apres trois essais : l'arret est execute. Il a
+  ete demande, et il peut s'agir d'une urgence.
+
+Precautions : "zero" est un chiffre legitime dans un code PIN ou un
+numero de compte. L'arret n'est donc declenche que si toute la reponse
+est une commande d'arret, avec un seul mot declencheur. Un code dicte
+"0 0 0 0" ne declenche rien. Dans la gestion du profil, "0 pour
+terminer" a ete remplace par "terminer", le 0 etant reserve a l'arret.
+
+Limite a connaitre : la commande vocale est entendue quand l'application
+ecoute, c'est-a-dire apres chaque question. Pendant qu'elle PARLE, le
+micro est ferme (sinon elle s'entendrait elle-meme et se declencherait
+seule). Pour couper immediatement une longue annonce, comme l'historique,
+utiliser la touche 0 de l'ecran : elle coupe la voix sur-le-champ.
+L'application ne conserve aucun etat authentifie : chaque operation
+sensible redemande l'identite, il n'y a donc pas de session a invalider.
 
 "Biometrie forte" n'est pas defini precisement par le cahier des
 charges. Il est interprete ici comme un double facteur : empreinte puis
@@ -423,18 +452,22 @@ travaille sur une donnee perimee.
   service de reconnaissance vocale Google, avec la langue francaise
   telechargee pour un usage hors ligne, resout le probleme sur tous
   les appareils qui l'acceptent.
-- Reponses "1 pour oui, 2 pour non" : le moteur vocal Android reconnait
-  mal les chiffres dits seuls (il renvoie parfois "hein" pour un, "de"
-  pour deux), alors que "oui" et "non" sont bien reconnus. L'application
-  accepte ces approximations quand elles constituent la reponse entiere,
-  et, si une reponse n'est pas comprise, elle redemande avec la consigne
-  "dites simplement oui, ou non" au lieu de la prendre pour un refus. Une
-  reponse ambigue (oui et non dans la meme phrase) est aussi redemandee.
-  Pour un virement, l'absence de reponse claire apres trois essais
-  annule l'operation : une reponse non comprise n'est jamais prise pour
-  un accord. L'ecran affiche "Derniere phrase entendue" : c'est le texte
-  exact renvoye par le moteur vocal, utile pour diagnostiquer un probleme
-  de reconnaissance sur un telephone donne.
+- Reponses courtes ("1 pour oui, 2 pour non", choix du menu) : le moteur
+  vocal Android reconnait mal les mots isoles, en particulier les
+  chiffres. Mesures prises : modele de reconnaissance "confirmation"
+  (prevu pour les reponses breves) plutot que la dictee libre ;
+  conservation du meilleur texte capte au lieu d'ecraser par un resultat
+  vide ; plusieurs tentatives d'ecoute dans la fenetre de 10 secondes
+  avant de reposer la question ; acceptation des approximations
+  phonetiques ("de" pour deux, "hein" pour un) quand elles forment toute
+  la reponse. Une reponse non comprise ou ambigue est toujours
+  redemandee (jamais prise pour un "non"), avec la consigne "dites
+  simplement oui, ou non", les mots longs etant mieux reconnus.
+  Pour un virement, les approximations de "un" ne valent pas "oui" :
+  seuls "oui", "1" et "un" confirment, et l'absence de reponse claire
+  annule l'operation. L'ecran affiche "Derniere phrase entendue" : le
+  texte exact renvoye par le moteur vocal, utile pour diagnostiquer un
+  telephone donne.
 - Certains telephones emettent un court bip systeme a chaque
   redemarrage de l'ecoute. C'est un comportement du moteur vocal
   Android, non modifiable par l'application.

@@ -16,6 +16,7 @@ import '../services/onboarding_fields.dart';
 import '../services/otp_flow.dart';
 import '../services/pin_enrollment_flow.dart';
 import '../services/profile_flow.dart';
+import '../services/stop_command.dart';
 import '../services/stt_helper.dart';
 import '../services/transfer_flow.dart';
 import '../services/tts_service.dart';
@@ -153,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (!personalDone || !bankDone) {
         if (isColdStart) {
-          await _runForm();
+          await _runStoppable(null, _runForm);
         }
         return;
       }
@@ -161,7 +162,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
       final needsPin = await OnboardingStorage.needsPinStep();
       if (needsFingerprint || needsPin) {
-        await _runSecurity();
+        await _runStoppable(null, _runSecurity);
       }
     } finally {
       _flowInProgress = false;
@@ -217,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       'de quelques informations pour ouvrir votre profil.',
     );
 
-    final listenFn = () => sttListenOnce(_speech);
+    final listenFn = _listenFor(null);
 
     final personalOk = await runFormFields(
       speak: TtsService.instance.speak,
@@ -258,7 +259,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (needsFingerprint) {
       final fingerprintFlow = FingerprintEnrollmentFlow(
         speak: TtsService.instance.speak,
-        listen: () => sttListenOnce(_speech),
+        listen: _listenFor(null),
       );
       await fingerprintFlow.run();
     }
@@ -267,7 +268,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (needsPin) {
       final pinFlow = PinEnrollmentFlow(
         speak: TtsService.instance.speak,
-        listen: () => sttListenOnce(_speech),
+        listen: _listenFor(null),
       );
       final pinOk = await pinFlow.run();
       if (pinOk) {
@@ -297,18 +298,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Commandes bancaires (touches 1 a 6 et 0)
   // ---------------------------------------------------------------------
 
-  SpeakFn _speakFor(CancelToken t) => (String text) async {
-        t.throwIfCancelled();
+  SpeakFn _speakFor(CancelToken? t) => (String text) async {
+        t?.throwIfCancelled();
         await TtsService.instance.speak(text);
-        t.throwIfCancelled();
+        t?.throwIfCancelled();
       };
 
-  ListenFn _listenFor(CancelToken t) => () async {
-        t.throwIfCancelled();
-        final result = await sttListenOnce(_speech);
-        t.throwIfCancelled();
+  /// Ecoute brute, sans interception de l'arret : utilisee pour la question
+  /// de confirmation de l'arret elle-meme.
+  ListenFn _rawListenFor(CancelToken? t) => () async {
+        t?.throwIfCancelled();
+        final result = await sttListenOnce(
+          _speech,
+          shouldStop: () => t?.isCancelled ?? false,
+        );
+        t?.throwIfCancelled();
         return result;
       };
+
+  /// Ecoute des parcours : dire "stop", "arrete" ou "zero" coupe l'activite
+  /// au lieu d'etre pris pour une reponse (nom, montant, numero...).
+  ListenFn _listenFor(CancelToken? t) => interceptStop(_rawListenFor(t));
+
+  /// Demande confirmation de l'arret. Sans reponse claire, l'arret est
+  /// execute : l'utilisateur l'a demande, il peut s'agir d'une urgence.
+  Future<bool> _confirmStop(CancelToken? t) async {
+    final answer = await askYesNo(
+      speak: _speakFor(t),
+      listen: _rawListenFor(t),
+      question: kStopConfirmQuestion,
+      maxAttempts: 3,
+    );
+    return answer != false;
+  }
+
+  Future<void> _performStop(CancelToken? t) async {
+    await _speakFor(t)(kStoppedMessage);
+    await _closeSession(announce: false);
+  }
+
+  /// Execute [body]. Si l'utilisateur demande l'arret, demande confirmation :
+  /// s'il confirme, l'application s'arrete (retour true) ; sinon l'activite
+  /// reprend depuis le debut de ce parcours. Les champs deja enregistres a
+  /// l'enrolement ne sont jamais redemandes.
+  Future<bool> _runStoppable(
+    CancelToken? t,
+    Future<void> Function() body,
+  ) async {
+    while (true) {
+      try {
+        await body();
+        return false;
+      } on StopRequested {
+        if (await _confirmStop(t)) {
+          await _performStop(t);
+          return true;
+        }
+        await _speakFor(t)('D\'accord, on reprend.');
+      }
+    }
+  }
 
   Future<void> _onKey(KeyDef key) async {
     HapticFeedback.mediumImpact();
@@ -318,6 +367,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _startAction(BankIntent intent) async {
     final myId = ++_requestSeq;
+
+    // Activite en cours au moment de l'appui. Si l'appui est sur "0"
+    // (arret) et que l'utilisateur refuse ensuite d'arreter, cette
+    // activite reprendra.
+    final interrupted = (_actionRunning && _activeIntent != BankIntent.quit)
+        ? _activeIntent
+        : BankIntent.none;
     _actionRunning = true;
 
     // Interrompt immediatement ce qui est en cours.
@@ -338,7 +394,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     final token = CancelToken();
     _activeToken = token;
-    final run = _executeAction(intent, token, myId);
+    final run = _executeAction(intent, token, myId, resume: interrupted);
     _activeRun = run;
     await run;
   }
@@ -358,17 +414,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case BankIntent.advisor:
         return 'Appel du conseiller...';
       case BankIntent.quit:
-        return 'Fermeture de la session...';
+        return 'Arret de Banque Parlante...';
       case BankIntent.none:
         return '';
+    }
+  }
+
+  /// Corps d'une commande bancaire (hors arret).
+  Future<void> _runIntent(
+    BankIntent intent,
+    SpeakFn speak,
+    ListenFn listen,
+  ) async {
+    switch (intent) {
+      case BankIntent.advisor:
+        await AdvisorFlow(speak: speak).run();
+        break;
+
+      case BankIntent.profile:
+        await ProfileFlow(speak: speak, listen: listen).run();
+        break;
+
+      case BankIntent.balance:
+      case BankIntent.history:
+      case BankIntent.transfer:
+      case BankIntent.otp:
+        if (!await _ensureProvisioned(speak: speak)) {
+          await speak(
+            'Votre compte bancaire n\'est pas encore active. Verifiez '
+            'votre connexion internet puis reessayez.',
+          );
+          break;
+        }
+        if (intent == BankIntent.balance) {
+          await BalanceFlow(speak: speak, listen: listen).run();
+        } else if (intent == BankIntent.history) {
+          await HistoryFlow(speak: speak, listen: listen).run();
+        } else if (intent == BankIntent.transfer) {
+          await TransferFlow(speak: speak, listen: listen).run();
+        } else {
+          await OtpFlow(speak: speak, listen: listen).run();
+        }
+        break;
+
+      case BankIntent.quit:
+      case BankIntent.none:
+        break;
     }
   }
 
   Future<void> _executeAction(
     BankIntent intent,
     CancelToken token,
-    int myId,
-  ) async {
+    int myId, {
+    BankIntent resume = BankIntent.none,
+  }) async {
     final speak = _speakFor(token);
     final listen = _listenFor(token);
 
@@ -382,44 +482,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     try {
-      switch (intent) {
-        case BankIntent.quit:
-          await speak('Session fermee. Au revoir.');
-          await _closeSession(announce: false);
+      if (intent == BankIntent.quit) {
+        // Touche 0 : l'activite en cours est deja coupee. Confirmation,
+        // puis arret ; si l'utilisateur refuse, on reprend l'activite.
+        if (await _confirmStop(token)) {
+          await _performStop(token);
           return;
-
-        case BankIntent.advisor:
-          await AdvisorFlow(speak: speak).run();
-          break;
-
-        case BankIntent.profile:
-          await ProfileFlow(speak: speak, listen: listen).run();
-          break;
-
-        case BankIntent.balance:
-        case BankIntent.history:
-        case BankIntent.transfer:
-        case BankIntent.otp:
-          if (!await _ensureProvisioned(speak: speak)) {
-            await speak(
-              'Votre compte bancaire n\'est pas encore active. Verifiez '
-              'votre connexion internet puis reessayez.',
-            );
-            break;
+        }
+        if (resume == BankIntent.none) {
+          await speak('D\'accord, Banque Parlante reste actif.');
+        } else {
+          await speak('D\'accord, on reprend.');
+          if (mounted) {
+            setState(() {
+              _activeIntent = resume;
+              _statusText = _statusFor(resume);
+            });
           }
-          if (intent == BankIntent.balance) {
-            await BalanceFlow(speak: speak, listen: listen).run();
-          } else if (intent == BankIntent.history) {
-            await HistoryFlow(speak: speak, listen: listen).run();
-          } else if (intent == BankIntent.transfer) {
-            await TransferFlow(speak: speak, listen: listen).run();
-          } else {
-            await OtpFlow(speak: speak, listen: listen).run();
-          }
-          break;
-
-        case BankIntent.none:
-          break;
+          final stopped = await _runStoppable(
+            token,
+            () => _runIntent(resume, speak, listen),
+          );
+          if (stopped) return;
+        }
+      } else {
+        final stopped = await _runStoppable(
+          token,
+          () => _runIntent(intent, speak, listen),
+        );
+        if (stopped) return;
       }
     } on FlowCancelled {
       // Interrompu par l'appui sur une autre touche : rien a faire.
@@ -446,13 +537,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Touche 0 - ferme la session et renvoie l'application en arriere-plan.
+  /// Ferme l'ecran et renvoie l'application en arriere-plan.
   ///
   /// L'application ne conserve aucun etat authentifie : chaque operation
   /// sensible redemande l'identite. Fermer la session consiste donc a
   /// couper voix, ecoute et invite biometrique, a liberer les drapeaux
   /// partages, puis a fermer l'ecran. Le service d'arriere-plan continue
-  /// d'ecouter le mot-cle : c'est le "retour en mode veille".
+  /// d'ecouter le mot-cle : c'est le "retour en mode veille", et dire
+  /// "Banque Parlante" relance l'application.
   Future<void> _closeSession({required bool announce}) async {
     _requestSeq++;
     _activeToken?.cancel();
@@ -464,7 +556,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (announce) {
       try {
-        await TtsService.instance.speak('Session fermee. Au revoir.');
+        await TtsService.instance.speak(kStoppedMessage);
       } catch (_) {}
     }
 

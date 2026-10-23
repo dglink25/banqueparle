@@ -31,7 +31,7 @@ const List<KeyDef> kKeypad = [
   KeyDef('4', BankIntent.otp, 'Code OTP'),
   KeyDef('5', BankIntent.profile, 'Profil'),
   KeyDef('6', BankIntent.advisor, 'Conseiller'),
-  KeyDef('0', BankIntent.quit, 'Quitter'),
+  KeyDef('0', BankIntent.quit, 'Arreter'),
 ];
 
 BankIntent intentForKey(String key) {
@@ -44,8 +44,50 @@ BankIntent intentForKey(String key) {
 /// Phrase posee a l'utilisateur apres le mot-cle.
 const String kMenuQuestion =
     'Que souhaitez-vous faire ? Dites : solde, historique, virement, code '
-    'de securite, profil, conseiller, ou quitter. Vous pouvez aussi dire '
-    'un numero, de 1 a 6, ou 0 pour quitter.';
+    'de securite, profil, conseiller, ou stop. Vous pouvez aussi dire un '
+    'numero, de 1 a 6, ou zero pour arreter.';
+
+/// Relance courte, si la premiere question du menu n'a recu aucune reponse.
+const String kMenuRetryQuestion =
+    'Dites par exemple : solde, virement, historique, ou stop.';
+
+/// Libelle annonce a l'utilisateur pour lui confirmer ce qui a ete compris.
+String intentLabel(BankIntent intent) {
+  switch (intent) {
+    case BankIntent.balance:
+      return 'consulter le solde';
+    case BankIntent.history:
+      return 'l\'historique des operations';
+    case BankIntent.transfer:
+      return 'effectuer un virement';
+    case BankIntent.otp:
+      return 'le code de securite';
+    case BankIntent.profile:
+      return 'la gestion du profil';
+    case BankIntent.advisor:
+      return 'contacter un conseiller';
+    case BankIntent.quit:
+      return 'arreter Banque Parlante';
+    case BankIntent.none:
+      return '';
+  }
+}
+
+/// Retire le nom de l'application d'une phrase reconnue, pour isoler la
+/// demande : "Banque Parlante solde" devient "solde". Permet de dire la
+/// demande dans la meme phrase que le mot-cle, comme l'application
+/// l'annonce a l'enrolement.
+String stripWakeWord(String recognized) {
+  var norm = normalizeText(recognized.replaceAll(RegExp(r"[-'\u2019]"), ' '));
+  const variants = [
+    'ma banque parlante', 'banque parlante', 'banc parlant',
+    'banque parlant', 'banc parlante', 'banque parle',
+  ];
+  for (final v in variants) {
+    norm = norm.replaceAll(v, ' ');
+  }
+  return norm.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
 
 const _history = {
   'historique', 'operations', 'operation', 'mouvements', 'mouvement',
@@ -60,7 +102,8 @@ const _advisor = {
   'conseiller', 'conseillere', 'appeler', 'contacter', 'humain', 'agence',
 };
 const _quit = {
-  'quitter', 'quitte', 'fermer', 'sortir', 'arreter', 'revoir', 'termine',
+  'quitter', 'quitte', 'fermer', 'sortir', 'arreter', 'arrete', 'arret',
+  'stop', 'stoppe', 'stopper', 'revoir', 'termine', 'urgence',
 };
 const _profile = {
   'profil', 'parametres', 'parametre', 'coordonnees', 'informations',

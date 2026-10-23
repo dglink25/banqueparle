@@ -13,6 +13,16 @@ typedef SpeakFn = Future<void> Function(String text);
 /// ou null/vide si rien n'a été entendu (silence).
 typedef ListenFn = Future<String?> Function();
 
+/// Indique au moteur d'ecoute que la reponse attendue est COURTE (oui/non,
+/// choix de menu). Lu par sttListenOnce, qui choisit alors le modele de
+/// reconnaissance "confirmation", plus fiable que la dictee libre sur les
+/// mots isoles. Chaque isolat Dart (service d'arriere-plan, interface) a
+/// sa propre copie de cette valeur, ce qui est voulu.
+class ListenHint {
+  ListenHint._();
+  static bool shortAnswer = false;
+}
+
 /// Pose une question et attend une réponse. Si rien n'est entendu, relance
 /// la question (jusqu'à [maxRetries] fois) pour ne pas boucler indéfiniment
 /// et épuiser la batterie si l'utilisateur est absent.
@@ -21,14 +31,24 @@ Future<String?> askWithRetry({
   required ListenFn listen,
   required String question,
   int maxRetries = 5,
+  bool shortAnswer = false,
+  String? retryQuestion,
 }) async {
   for (var attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt == 0) {
       await speak(question);
     } else {
-      await speak('Je n\'ai pas bien entendu. $question');
+      // [retryQuestion] permet une relance plus courte que la question
+      // initiale (un long menu ne doit pas etre repete en entier).
+      await speak('Je n\'ai pas bien entendu. ${retryQuestion ?? question}');
     }
-    final answer = await listen();
+    ListenHint.shortAnswer = shortAnswer;
+    String? answer;
+    try {
+      answer = await listen();
+    } finally {
+      ListenHint.shortAnswer = false;
+    }
     if (answer != null && answer.trim().isNotEmpty) {
       return answer.trim();
     }
@@ -51,10 +71,14 @@ const String kYesNoHint = 'Dites 1 pour oui, ou 2 pour non.';
 /// Comparaison mot par mot (et non par sous-chaine) : "aucun" contient
 /// "un" et serait sinon compris comme "oui".
 ///
+/// [strictYes] : pour les confirmations sensibles (virement). Seuls les
+/// "oui" explicites, "1" et "un" valent accord ; les approximations
+/// phonetiques d'un chiffre isole ne sont plus acceptees.
+///
 /// Si la reponse contient a la fois un mot "oui" et un mot "non", elle
 /// est consideree ambigue (null) : mieux vaut redemander que de deviner,
 /// surtout avant un virement.
-bool? parseYesNo(String raw) {
+bool? parseYesNo(String raw, {bool strictYes = false}) {
   final words = normalizedWords(raw);
   if (words.isEmpty) return null;
 
@@ -78,7 +102,12 @@ bool? parseYesNo(String raw) {
     if (noWords.contains(w)) no = true;
   }
   if (words.length == 1) {
-    if (yesAloneWords.contains(words.first)) yes = true;
+    // Une approximation de "un" ne vaut "oui" que hors mode strict : mal
+    // reconnu, un "non" pourrait ressembler a une de ces formes, et pour
+    // une operation qui deplace de l'argent, l'erreur doit toujours aller
+    // dans le sens de l'annulation. Les approximations de "deux" (=non)
+    // restent acceptees dans tous les cas.
+    if (!strictYes && yesAloneWords.contains(words.first)) yes = true;
     if (noAloneWords.contains(words.first)) no = true;
   }
 
@@ -110,6 +139,7 @@ Future<bool?> askYesNo({
   String hint = kYesNoHint,
   String simpleHint = 'Dites simplement oui, ou non.',
   int maxAttempts = 4,
+  bool strictYes = false,
 }) async {
   var heardSomethingUnclear = false;
   for (var attempt = 0; attempt < maxAttempts; attempt++) {
@@ -123,12 +153,18 @@ Future<bool?> askYesNo({
     }
     await speak(prompt);
 
-    final answer = await listen();
+    ListenHint.shortAnswer = true; // reponse breve attendue
+    String? answer;
+    try {
+      answer = await listen();
+    } finally {
+      ListenHint.shortAnswer = false;
+    }
     if (answer == null || answer.trim().isEmpty) {
       heardSomethingUnclear = false;
       continue;
     }
-    final parsed = parseYesNo(answer);
+    final parsed = parseYesNo(answer, strictYes: strictYes);
     if (parsed != null) return parsed;
     heardSomethingUnclear = true;
   }
