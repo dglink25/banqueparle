@@ -31,7 +31,7 @@ const List<KeyDef> kKeypad = [
   KeyDef('4', BankIntent.otp, 'Code OTP'),
   KeyDef('5', BankIntent.profile, 'Profil'),
   KeyDef('6', BankIntent.advisor, 'Conseiller'),
-  KeyDef('0', BankIntent.quit, 'Arreter'),
+  KeyDef('0', BankIntent.quit, 'Arrêter'),
 ];
 
 BankIntent intentForKey(String key) {
@@ -41,15 +41,15 @@ BankIntent intentForKey(String key) {
   return BankIntent.none;
 }
 
-/// Phrase posee a l'utilisateur apres le mot-cle.
-const String kMenuQuestion =
-    'Que souhaitez-vous faire ? Dites : solde, historique, virement, code '
-    'de securite, profil, conseiller, ou stop. Vous pouvez aussi dire un '
-    'numero, de 1 a 6, ou zero pour arreter.';
+/// Question posee apres le mot-cle. Volontairement tres courte : pour un
+/// utilisateur malvoyant, un long menu parle avant de pouvoir repondre est
+/// fatigant. Les options ne sont detaillees qu'en l'absence de reponse.
+const String kMenuQuestion = 'Que souhaitez-vous faire ?';
 
 /// Relance courte, si la premiere question du menu n'a recu aucune reponse.
 const String kMenuRetryQuestion =
-    'Dites par exemple : solde, virement, historique, ou stop.';
+    'Dites : solde, historique, virement, code de sécurité, profil, '
+    'conseiller, ou stop. Vous pouvez aussi dire un numéro de 1 à 6.';
 
 /// Libelle annonce a l'utilisateur pour lui confirmer ce qui a ete compris.
 String intentLabel(BankIntent intent) {
@@ -57,17 +57,17 @@ String intentLabel(BankIntent intent) {
     case BankIntent.balance:
       return 'consulter le solde';
     case BankIntent.history:
-      return 'l\'historique des operations';
+      return 'l\'historique des opérations';
     case BankIntent.transfer:
       return 'effectuer un virement';
     case BankIntent.otp:
-      return 'le code de securite';
+      return 'le code de sécurité';
     case BankIntent.profile:
       return 'la gestion du profil';
     case BankIntent.advisor:
       return 'contacter un conseiller';
     case BankIntent.quit:
-      return 'arreter Banque Parlante';
+      return 'arrêter Banque Parlante';
     case BankIntent.none:
       return '';
   }

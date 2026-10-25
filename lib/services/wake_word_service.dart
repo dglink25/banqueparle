@@ -11,10 +11,12 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../utils/onboarding_storage.dart';
 import '../utils/text_normalize.dart';
 import 'command_intent.dart';
+import 'grammars.dart';
 import 'onboarding_fields.dart';
 import 'stop_command.dart';
 import 'stt_helper.dart';
 import 'voice_dialog.dart';
+import 'vosk_engine.dart';
 
 /// -----------------------------------------------------------------------
 /// WakeWordService
@@ -173,12 +175,52 @@ void onServiceStart(ServiceInstance service) async {
 
   service.on('stopService').listen((event) {
     speech.stop();
+    unawaited(VoskEngine.stopWake());
     service.stopSelf();
   });
 
+  // --- Moteur hors ligne Vosk : le service en est l'unique proprietaire ---
+  // (un seul modele en memoire, un seul acces au micro). L'ecran lui
+  // delegue ses ecoutes par messages.
+  VoskEngine.isOwner = true;
+  unawaited(VoskEngine.ensureReady());
+
+  final cancelledRemote = <String>{};
+  service.on('vosk_cancel').listen((event) {
+    final id = event?['id']?.toString();
+    if (id != null) cancelledRemote.add(id);
+  });
+  service.on('vosk_listen').listen((event) async {
+    if (event == null) return;
+    final id = event['id']?.toString() ?? '';
+    final grammar = (event['grammar'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        const <String>[];
+    final timeoutMs = (event['timeoutMs'] as num?)?.toInt() ?? 10000;
+
+    VoskOutcome outcome;
+    try {
+      outcome = await VoskEngine.listenOnce(
+        grammar: grammar,
+        timeout: Duration(milliseconds: timeoutMs),
+        shouldStop: () => cancelledRemote.contains(id),
+      );
+    } catch (_) {
+      outcome = const VoskOutcome.unavailable();
+    }
+    cancelledRemote.remove(id);
+    service.invoke('vosk_heard', {
+      'id': id,
+      'text': outcome.text,
+      'unavailable': outcome.unavailable,
+    });
+  });
+
   if (!speechReady) {
+    // Le moteur Google est absent ou refuse : ce n'est plus une raison
+    // d'arreter le service, Vosk peut assurer l'ecoute du mot-cle.
     debugPrint('[WakeWord] speech_to_text indisponible sur cet appareil.');
-    return;
   }
 
   bool handlingWakeWord = false; // evite les declenchements concurrents
@@ -249,22 +291,22 @@ void onServiceStart(ServiceInstance service) async {
           await OnboardingStorage.setNeedsPinStep(true);
           await speak(
             'Merci. Pour finaliser votre inscription, ouvrez votre '
-            'telephone : nous allons configurer la securite de votre '
+            'téléphone : nous allons configurer la sécurité de votre '
             'compte, empreinte digitale puis code secret.',
           );
           await OnboardingStorage.markBackgroundSpeech();
           await _triggerAppWakeUp(flnp, service);
         } else {
           await speak(
-            'Je n\'ai pas reussi a vous entendre. Redites '
-            '"Banque Parlante" quand vous serez pret a continuer.',
+            'Je n\'ai pas réussi à vous entendre. Redites '
+            '"Banque Parlante" quand vous serez prêt à continuer.',
           );
           await OnboardingStorage.markBackgroundSpeech();
         }
       } else if (needsFingerprint || needsPin) {
         await speak(
-          'Il reste a finaliser la securite de votre compte. '
-          'Merci d\'ouvrir votre telephone.',
+          'Il reste à finaliser la sécurité de votre compte. '
+          'Merci d\'ouvrir votre téléphone.',
         );
         await OnboardingStorage.markBackgroundSpeech();
         await _triggerAppWakeUp(flnp, service);
@@ -293,6 +335,7 @@ void onServiceStart(ServiceInstance service) async {
         retryQuestion: kMenuRetryQuestion,
         maxRetries: 1,
         shortAnswer: true,
+        grammar: kMenuGrammar,
       );
       if (command != null) intent = detectIntent(command);
     }
@@ -307,7 +350,7 @@ void onServiceStart(ServiceInstance service) async {
       // premier plan : on enregistre l'action, puis on reveille l'ecran.
       await OnboardingStorage.setPendingAction(intent.name);
       await speak('D\'accord : ${intentLabel(intent)}. Ouvrez votre '
-          'telephone si l\'ecran ne s\'allume pas.');
+          'téléphone si l\'écran ne s\'allume pas.');
       await OnboardingStorage.markBackgroundSpeech();
       await _triggerAppWakeUp(flnp, service);
     } else if (command != null) {
@@ -326,11 +369,12 @@ void onServiceStart(ServiceInstance service) async {
     handlingWakeWord = true;
     try {
       await speech.stop();
+      await VoskEngine.stopWake();
 
       // Si l'interface traite deja un flux, ne pas parler par-dessus :
       // chevauchement audio et ecoutes concurrentes.
       if (await OnboardingStorage.isFlowInProgress()) {
-        debugPrint('[WakeWord] Flux deja en cours au premier plan, ignore.');
+        debugPrint('[WakeWord] Flux déjà en cours au premier plan, ignore.');
         return;
       }
 
@@ -355,8 +399,18 @@ void onServiceStart(ServiceInstance service) async {
     } catch (e) {
       debugPrint('[WakeWord] Erreur pendant le traitement du mot-cle: $e');
     } finally {
+      // Laisse s'eteindre la fin de la derniere phrase prononcee avant de
+      // reprendre l'ecoute du mot-cle : elle contient souvent "Banque
+      // Parlante" ("Redites Banque Parlante...") et se declencherait seule.
+      await Future.delayed(const Duration(milliseconds: 1200));
       handlingWakeWord = false;
     }
+  }
+
+  void onVoskWakeText(String text) {
+    if (handlingWakeWord) return;
+    if (!containsWakeWord(text)) return;
+    unawaited(handleWakeWordDetected(text));
   }
 
   void fireWake() {
@@ -377,6 +431,8 @@ void onServiceStart(ServiceInstance service) async {
     }());
   }
 
+  final wakeGrammar = buildWakeGrammar();
+
   Future<void> listenLoop() async {
     while (true) {
       // Le micro ne peut servir qu'a une seule reconnaissance a la fois :
@@ -385,6 +441,31 @@ void onServiceStart(ServiceInstance service) async {
       // pendant sa propre conversation : ce serait couper la reponse
       // que l'utilisateur est en train de donner.
       final foregroundBusy = await OnboardingStorage.isFlowInProgress();
+      final voskReady = await VoskEngine.ensureReady();
+
+      if (voskReady) {
+        // Ecoute du mot-cle hors ligne (Vosk) : prioritaire.
+        if (speech.isListening) await speech.stop();
+        if (foregroundBusy || handlingWakeWord) {
+          if (VoskEngine.wakeRunning && !handlingWakeWord) {
+            await VoskEngine.stopWake();
+          }
+        } else if (!VoskEngine.wakeRunning) {
+          final started = await VoskEngine.startWake(
+            grammar: wakeGrammar,
+            onText: onVoskWakeText,
+          );
+          if (!started) await Future.delayed(const Duration(seconds: 3));
+        }
+        await Future.delayed(const Duration(milliseconds: 500));
+        continue;
+      }
+
+      // --- Repli : moteur Google ---
+      if (!speechReady) {
+        await Future.delayed(const Duration(seconds: 2));
+        continue;
+      }
       if (foregroundBusy && speech.isListening && !handlingWakeWord) {
         await speech.stop();
       }
@@ -413,7 +494,7 @@ void onServiceStart(ServiceInstance service) async {
             listenMode: stt.ListenMode.confirmation,
           );
         } catch (e) {
-          debugPrint('[WakeWord] Erreur pendant l\'ecoute: $e');
+          debugPrint('[WakeWord] Erreur pendant l\'écoute: $e');
         }
       }
       await Future.delayed(const Duration(milliseconds: 500));

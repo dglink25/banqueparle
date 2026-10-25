@@ -16,7 +16,7 @@ Future<bool> verifyPin({
 }) async {
   final storedHash = await OnboardingStorage.getPinHash();
   if (storedHash == null) {
-    await speak('Aucun code secret n\'est configure sur ce compte.');
+    await speak('Aucun code secret n\'est configuré sur ce compte.');
     return false;
   }
 
@@ -25,8 +25,8 @@ Future<bool> verifyPin({
       speak: speak,
       listen: listen,
       question: attempt == 1
-          ? 'Dites votre code secret a quatre chiffres.'
-          : 'Code incorrect. Redites votre code secret a quatre chiffres.',
+          ? 'Dites votre code secret à quatre chiffres.'
+          : 'Code incorrect. Redites votre code secret à quatre chiffres.',
       maxRetries: 3,
     );
     if (raw == null) return false;

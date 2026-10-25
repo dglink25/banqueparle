@@ -38,7 +38,7 @@ class TransferFlow {
       strictYes: true,
     );
     if (confirmed != true) {
-      await speak('Virement annule.');
+      await speak('Virement annulé.');
       return;
     }
 
@@ -46,8 +46,8 @@ class TransferFlow {
     final authenticated = await gate.strong('Confirmez le virement');
     if (!authenticated) {
       await speak(
-        'Identite non confirmee. Le virement n\'a pas ete effectue, par '
-        'securite.',
+        'Identité non confirmée. Le virement n\'a pas été effectué, par '
+        'sécurité.',
       );
       return;
     }
@@ -82,7 +82,7 @@ class TransferFlow {
       final raw = await askWithRetry(
         speak: speak,
         listen: listen,
-        question: 'Quel est le numero de compte du destinataire ?',
+        question: 'Quel est le numéro de compte du destinataire ?',
         maxRetries: 3,
       );
       if (raw == null) return null;
@@ -93,7 +93,7 @@ class TransferFlow {
         candidate = extractDigits(raw, maxLength: 24);
       }
       if (candidate.isEmpty) {
-        await speak('Je n\'ai pas compris ce numero de compte.');
+        await speak('Je n\'ai pas compris ce numéro de compte.');
         continue;
       }
 

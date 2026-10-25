@@ -52,3 +52,6 @@ app.*.symbols
 # --- Exceptions : on garde nos overrides Android versionnés ---
 !android_overrides/
 !android_overrides/**
+
+# Modele vocal telecharge par la CI (non versionne : 41 Mo)
+assets/models/*.zip

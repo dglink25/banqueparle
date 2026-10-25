@@ -15,6 +15,8 @@ class OnboardingStorage {
   static const _kFlowInProgress = 'flow_in_progress_at_ms';
   static const _kLastHeard = 'last_heard_text';
   static const _kLastDbError = 'last_db_error';
+  static const _kVoskModelPath = 'vosk_model_path';
+  static const _kVoiceStatus = 'voice_engine_status';
   static const _kAccountProvisioned = 'account_provisioned';
   static const _kPendingAction = 'pending_action';
   static const _kLastBackgroundSpeechAt = 'last_background_speech_at_ms';
@@ -207,6 +209,29 @@ class OnboardingStorage {
     return p.getString(_kLastDbError) ?? '';
   }
 
+  /// Chemin du modele vocal Vosk extrait par l'interface. Le service
+  /// d'arriere-plan, qui possede le moteur, le relit pour le charger.
+  static Future<String?> getVoskModelPath() async {
+    final p = await _prefs();
+    return p.getString(_kVoskModelPath);
+  }
+
+  static Future<void> setVoskModelPath(String path) async {
+    final p = await _prefs();
+    await p.setString(_kVoskModelPath, path);
+  }
+
+  /// Etat du moteur vocal, affiche a l'ecran pour le diagnostic.
+  static Future<void> setVoiceStatus(String text) async {
+    final p = await _prefs();
+    await p.setString(_kVoiceStatus, text);
+  }
+
+  static Future<String> getVoiceStatus() async {
+    final p = await _prefs();
+    return p.getString(_kVoiceStatus) ?? '';
+  }
+
   static Future<void> resetAll() async {
     final p = await _prefs();
     final keys = p.getKeys().where((k) =>
@@ -219,6 +244,7 @@ class OnboardingStorage {
         k == _kFlowInProgress ||
         k == _kLastHeard ||
         k == _kLastDbError ||
+        k == _kVoiceStatus ||
         k == _kAccountProvisioned ||
         k == _kPendingAction ||
         k == _kLastBackgroundSpeechAt ||

@@ -35,7 +35,7 @@ class AuthGate {
   Future<bool> biometric(String reason) async {
     if (await _biometricAvailable()) {
       if (await _fingerprint(reason)) return true;
-      await speak('Empreinte non validee. Nous passons au code secret.');
+      await speak('Empreinte non validée. Nous passons au code secret.');
     }
     return verifyPin(speak: speak, listen: listen);
   }
@@ -43,12 +43,12 @@ class AuthGate {
   Future<bool> strong(String reason) async {
     if (await _biometricAvailable()) {
       if (!await _fingerprint(reason)) {
-        await speak('Empreinte non validee. Operation refusee par securite.');
+        await speak('Empreinte non validée. Opération refusée par sécurité.');
         return false;
       }
     } else {
       await speak(
-        'Aucune empreinte n\'est disponible sur ce telephone. Le code '
+        'Aucune empreinte n\'est disponible sur ce téléphone. Le code '
         'secret est exige.',
       );
     }

@@ -39,7 +39,7 @@ class FingerprintEnrollmentFlow {
     final canCheck = await _canUseBiometrics();
     if (!canCheck) {
       await speak(
-        'Aucune empreinte digitale n\'est configuree sur ce telephone. '
+        'Aucune empreinte digitale n\'est configurée sur ce téléphone. '
         'Nous passons directement au code secret.',
       );
       await OnboardingStorage.setNeedsFingerprintStep(false);
@@ -52,7 +52,7 @@ class FingerprintEnrollmentFlow {
     while (enrolledCount < kMaxFingers) {
       final ordinal = enrolledCount == 0
           ? 'votre empreinte'
-          : 'une nouvelle empreinte, numero ${enrolledCount + 1}';
+          : 'une nouvelle empreinte, numéro ${enrolledCount + 1}';
       await speak('Veuillez poser votre doigt sur le lecteur d\'empreinte '
           'pour enregistrer $ordinal.');
 
@@ -62,7 +62,7 @@ class FingerprintEnrollmentFlow {
         enrolledCount++;
         atLeastOneSuccess = true;
         await OnboardingStorage.setFingerprintCount(enrolledCount);
-        await speak('Empreinte reconnue avec succes.');
+        await speak('Empreinte reconnue avec succès.');
 
         if (enrolledCount >= kMaxFingers) {
           await speak('Vous avez atteint le nombre maximal de trois '
@@ -81,7 +81,7 @@ class FingerprintEnrollmentFlow {
         }
       } else {
         await speak(
-          'Echec apres plusieurs tentatives. Nous passons a l\'etape '
+          'Échec après plusieurs tentatives. Nous passons à l\'étape '
           'suivante.',
         );
         break;

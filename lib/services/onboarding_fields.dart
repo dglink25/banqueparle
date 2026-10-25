@@ -53,7 +53,7 @@ String _normalizeAccountType(String raw) {
   final t = raw.toLowerCase();
   if (t.contains('1') || t.contains('courant')) return 'Compte courant';
   if (t.contains('2') || t.contains('epargne') || t.contains('épargne')) {
-    return 'Compte epargne';
+    return 'Compte épargne';
   }
   return raw;
 }
@@ -70,7 +70,7 @@ const List<OnboardingField> kPersonalInfoFields = [
   ),
   OnboardingField(
     'phone_number',
-    'Quel est votre numero de telephone, pour les alertes de securite ?',
+    'Quel est votre numéro de téléphone, pour les alertes de sécurité ?',
     normalize: _normalizeDigits,
   ),
 ];
@@ -84,13 +84,13 @@ const List<OnboardingField> kPersonalInfoFields = [
 const List<OnboardingField> kBankAccountFields = [
   OnboardingField(
     'account_number',
-    'Quel est votre numero de compte bancaire ?',
+    'Quel est votre numéro de compte bancaire ?',
     normalize: _normalizeDigits,
   ),
   OnboardingField(
     'account_type',
     'Quel type de compte utilisez-vous ? Dites 1 pour compte courant, '
-    'ou 2 pour compte epargne.',
+    'ou 2 pour compte épargne.',
     confirmBack: false,
     normalize: _normalizeAccountType,
   ),

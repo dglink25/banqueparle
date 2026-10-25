@@ -21,14 +21,14 @@ DbErrorInfo describeDbError(Object error) {
 
   if (low.contains('database') && low.contains('does not exist')) {
     return DbErrorInfo(
-      'La base de donnees est introuvable. Le nom de la base dans la '
+      'La base de données est introuvable. Le nom de la base dans la '
       'configuration est incorrect.',
       detail,
     );
   }
   if (low.contains('function') && low.contains('does not exist')) {
     return DbErrorInfo(
-      'Le script SQL n\'est pas installe sur la base. Il faut l\'executer '
+      'Le script SQL n\'est pas installé sur la base. Il faut l\'exécuter '
       'une fois dans la console Neon.',
       detail,
     );
@@ -37,8 +37,8 @@ DbErrorInfo describeDbError(Object error) {
       (low.contains('role') && low.contains('does not exist')) ||
       low.contains('authentication failed')) {
     return DbErrorInfo(
-      'Identifiants de la base refuses. Verifiez le role et le mot de '
-      'passe de provisionnement, et que le script SQL a ete execute.',
+      'Identifiants de la base refusés. Vérifiez le rôle et le mot de '
+      'passe de provisionnement, et que le script SQL a été exécuté.',
       detail,
     );
   }
@@ -51,15 +51,15 @@ DbErrorInfo describeDbError(Object error) {
   if (low.contains('endpoint') &&
       (low.contains('not specified') || low.contains('sni'))) {
     return DbErrorInfo(
-      'Le serveur Neon n\'a pas identifie le projet de la connexion.',
+      'Le serveur Neon n\'a pas identifié le projet de la connexion.',
       detail,
     );
   }
   if (low.contains('failed host lookup') ||
       low.contains('nodename nor servname')) {
     return DbErrorInfo(
-      'L\'adresse du serveur est introuvable. Verifiez que le telephone a '
-      'internet et que l\'hote de la base est correct.',
+      'L\'adresse du serveur est introuvable. Vérifiez que le téléphone a '
+      'internet et que l\'hôte de la base est correct.',
       detail,
     );
   }
@@ -70,13 +70,13 @@ DbErrorInfo describeDbError(Object error) {
       low.contains('connection closed') ||
       low.contains('network')) {
     return DbErrorInfo(
-      'Impossible de joindre la banque. Verifiez votre connexion '
-      'internet et reessayez.',
+      'Impossible de joindre la banque. Vérifiez votre connexion '
+      'internet et réessayez.',
       detail,
     );
   }
   return DbErrorInfo(
-    'Une erreur est survenue avec la base de donnees.',
+    'Une erreur est survenue avec la base de données.',
     detail,
   );
 }

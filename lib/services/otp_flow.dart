@@ -15,20 +15,20 @@ class OtpFlow {
 
   Future<void> run() async {
     final gate = AuthGate(speak: speak, listen: listen);
-    if (!await gate.biometric('Generer un code de securite')) {
-      await speak('Identite non confirmee. Aucun code n\'est genere.');
+    if (!await gate.biometric('Générer un code de sécurité')) {
+      await speak('Identité non confirmée. Aucun code n\'est généré.');
       return;
     }
 
     final result = await TransferService.generateOtp();
     if (result.code == null) {
-      await speak(result.error ?? 'Impossible de generer le code.');
+      await speak(result.error ?? 'Impossible de générer le code.');
       return;
     }
 
     final spelled = result.code!.split('').join(' ');
     await speak(
-      'Votre code a usage unique est : $spelled. Il est valable cinq '
+      'Votre code à usage unique est : $spelled. Il est valable cinq '
       'minutes.',
     );
 
@@ -36,13 +36,13 @@ class OtpFlow {
       final repeat = await askYesNo(
         speak: speak,
         listen: listen,
-        question: 'Souhaitez-vous que je repete le code ?',
-        hint: 'Dites 1 pour repeter, ou 2 pour terminer.',
-        simpleHint: 'Dites simplement oui pour repeter, ou non pour terminer.',
+        question: 'Souhaitez-vous que je répète le code ?',
+        hint: 'Dites 1 pour répéter, ou 2 pour terminer.',
+        simpleHint: 'Dites simplement oui pour répéter, ou non pour terminer.',
         maxAttempts: 2,
       );
       if (repeat != true) return;
-      await speak('Je repete : $spelled.');
+      await speak('Je répète : $spelled.');
     }
   }
 }

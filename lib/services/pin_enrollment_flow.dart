@@ -33,25 +33,25 @@ class PinEnrollmentFlow {
   Future<bool> run({String? introduction}) async {
     await speak(
       introduction ??
-          'Pour renforcer la securite de votre compte, veuillez definir un '
-              'code secret a quatre chiffres. Ce code sera utilise si votre '
+          'Pour renforcer la sécurité de votre compte, veuillez définir un '
+              'code secret à quatre chiffres. Ce code sera utilisé si votre '
               'empreinte digitale n\'est pas disponible.',
     );
 
     for (var attempt = 1; attempt <= kMaxAttempts; attempt++) {
       final firstEntry = await _collectFourDigits(
-        'Dites votre code a quatre chiffres, un chiffre apres l\'autre.',
+        'Dites votre code à quatre chiffres, un chiffre après l\'autre.',
       );
       if (firstEntry == null) {
-        await speak('Nous reessaierons plus tard pour le code secret.');
+        await speak('Nous réessaierons plus tard pour le code secret.');
         return false;
       }
 
       final secondEntry = await _collectFourDigits(
-        'Merci. Redites le meme code, pour confirmation.',
+        'Merci. Redites le même code, pour confirmation.',
       );
       if (secondEntry == null) {
-        await speak('Nous reessaierons plus tard pour le code secret.');
+        await speak('Nous réessaierons plus tard pour le code secret.');
         return false;
       }
 
@@ -59,18 +59,18 @@ class PinEnrollmentFlow {
         final hash = sha256.convert(utf8.encode(firstEntry)).toString();
         await OnboardingStorage.setPinHash(hash);
         await OnboardingStorage.setNeedsPinStep(false);
-        await speak('Votre code secret a ete enregistre avec succes.');
+        await speak('Votre code secret a été enregistré avec succès.');
         return true;
       }
 
       await speak(
-        'Les deux codes ne correspondent pas. Reprenons depuis le debut.',
+        'Les deux codes ne correspondent pas. Reprenons depuis le début.',
       );
     }
 
     await speak(
-      'Nous n\'avons pas pu confirmer votre code apres plusieurs '
-      'tentatives. Redites Banque Parlante plus tard pour reessayer.',
+      'Nous n\'avons pas pu confirmer votre code après plusieurs '
+      'tentatives. Redites Banque Parlante plus tard pour réessayer.',
     );
     return false;
   }

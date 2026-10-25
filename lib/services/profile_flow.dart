@@ -1,5 +1,6 @@
 import '../utils/onboarding_storage.dart';
 import '../utils/text_normalize.dart';
+import 'grammars.dart';
 import 'onboarding_fields.dart';
 import 'pin_enrollment_flow.dart';
 import 'pin_verification.dart';
@@ -40,13 +41,14 @@ class ProfileFlow {
         listen: listen,
         question: i == 0
             ? 'Souhaitez-vous modifier une information ? Dites 1 pour le '
-                'nom, 2 pour le telephone, 3 pour la date de naissance, '
+                'nom, 2 pour le téléphone, 3 pour la date de naissance, '
                 '4 pour le code secret, ou dites terminer.'
             : 'Une autre modification ? Dites 1 pour le nom, 2 pour le '
-                'telephone, 3 pour la date de naissance, 4 pour le code '
+                'téléphone, 3 pour la date de naissance, 4 pour le code '
                 'secret, ou dites terminer.',
         maxRetries: 1,
         shortAnswer: true,
+        grammar: kProfileGrammar,
       );
       if (choice == null) return;
 
@@ -56,7 +58,7 @@ class ProfileFlow {
         continue;
       }
       if (target == 'done') {
-        await speak('Gestion du profil terminee.');
+        await speak('Gestion du profil terminée.');
         return;
       }
       await _modify(target);
@@ -82,9 +84,9 @@ class ProfileFlow {
   }
 
   Future<void> _readProfile() async {
-    final name = await OnboardingStorage.getField('full_name') ?? 'non renseigne';
+    final name = await OnboardingStorage.getField('full_name') ?? 'non renseigné';
     final birth =
-        await OnboardingStorage.getField('birth_date') ?? 'non renseignee';
+        await OnboardingStorage.getField('birth_date') ?? 'non renseignée';
     final phone = await OnboardingStorage.getField('phone_number');
     final account = await OnboardingStorage.getField('account_number');
     final type = await OnboardingStorage.getField('account_type') ?? '';
@@ -98,22 +100,22 @@ class ProfileFlow {
 
     await speak('Voici votre profil. Nom : $name. Date de naissance : '
         '$birth.');
-    final phoneText = phone != null ? spell(phone) : 'non renseigne';
+    final phoneText = phone != null ? spell(phone) : 'non renseigné';
     final accountText = last4 != null ? spell(last4) : 'inconnu';
     final typeText = type.isNotEmpty ? ', $type' : '';
     await speak(
-      'Telephone : $phoneText. Compte se terminant par $accountText'
+      'Téléphone : $phoneText. Compte se terminant par $accountText'
       '$typeText.',
     );
     final String fingerText;
     if (fingers == 0) {
-      fingerText = 'Aucune empreinte enregistree';
+      fingerText = 'Aucune empreinte enregistrée';
     } else if (fingers == 1) {
-      fingerText = '1 empreinte enregistree';
+      fingerText = '1 empreinte enregistrée';
     } else {
-      fingerText = '$fingers empreintes enregistrees';
+      fingerText = '$fingers empreintes enregistrées';
     }
-    final pinText = hasPin ? 'est defini' : 'n\'est pas defini';
+    final pinText = hasPin ? 'est défini' : 'n\'est pas défini';
     await speak('$fingerText. Le code secret $pinText.');
   }
 
@@ -121,12 +123,12 @@ class ProfileFlow {
     if (target == 'pin') {
       final ok = await verifyPin(speak: speak, listen: listen);
       if (!ok) {
-        await speak('Ancien code non confirme. Le code secret n\'est pas '
-            'modifie.');
+        await speak('Ancien code non confirmé. Le code secret n\'est pas '
+            'modifié.');
         return;
       }
       await PinEnrollmentFlow(speak: speak, listen: listen).run(
-        introduction: 'Choisissez votre nouveau code secret a quatre '
+        introduction: 'Choisissez votre nouveau code secret à quatre '
             'chiffres.',
       );
       return;
@@ -138,7 +140,7 @@ class ProfileFlow {
       field: _field(target),
     );
     if (value == null) {
-      await speak('Modification annulee.');
+      await speak('Modification annulée.');
       return;
     }
     await OnboardingStorage.setField(target, value);
@@ -147,13 +149,13 @@ class ProfileFlow {
       final synced = await TransferService.updateOwnerName(value);
       await speak(
         synced
-            ? 'Votre nom a ete mis a jour.'
-            : 'Votre nom a ete mis a jour sur ce telephone, mais n\'a pas '
-                'pu etre synchronise avec la banque. Verifiez votre '
+            ? 'Votre nom a été mis à jour.'
+            : 'Votre nom a été mis à jour sur ce téléphone, mais n\'a pas '
+                'pu être synchronisé avec la banque. Vérifiez votre '
                 'connexion internet.',
       );
     } else {
-      await speak('Information mise a jour.');
+      await speak('Information mise à jour.');
     }
   }
 }

@@ -94,6 +94,18 @@ jobs:
           echo "--- Contenu final ---"
           cat "$GRADLE_FILE"
 
+      # 7b. Telecharge le modele de reconnaissance vocale hors ligne (Vosk,
+      #     francais, 41 Mo, licence Apache 2.0). Il est integre a l'APK ;
+      #     il n'est pas versionne dans le depot.
+      - name: Telecharger le modele vocal Vosk (francais)
+        run: |
+          set -e
+          mkdir -p assets/models
+          curl -fL --retry 4 --retry-delay 5 -o assets/models/vosk-model-small-fr-0.22.zip \
+            https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip
+          ls -l assets/models/
+          unzip -tq assets/models/vosk-model-small-fr-0.22.zip
+
       # 8. Récupère les dépendances Dart/Flutter
       - name: flutter pub get
         run: flutter pub get
@@ -161,7 +173,11 @@ jobs:
           if [ -z "$ADVISOR_PHONE" ]; then
             echo "::warning::ADVISOR_PHONE absent : la touche 6 (conseiller) annoncera que le numero n'est pas configure."
           fi
-          flutter build apk --release \
+          # --no-shrink : le moteur vocal (Vosk/JNA) ne supporte pas la reduction
+          # de code R8. --target-platform : telephones ARM uniquement, ce qui evite
+          # de multiplier la taille de l'APK par les bibliotheques x86.
+          flutter build apk --release --no-shrink \
+            --target-platform android-arm,android-arm64 \
             --dart-define=NEON_HOST="$NEON_HOST" \
             --dart-define=NEON_DATABASE="$DB_NAME" \
             --dart-define=NEON_PROVISIONER_USER="$NEON_PROVISIONER_USER" \

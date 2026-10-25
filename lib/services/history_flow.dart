@@ -15,35 +15,35 @@ class HistoryFlow {
   HistoryFlow({required this.speak, required this.listen});
 
   static const _months = [
-    'janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin', 'juillet',
-    'aout', 'septembre', 'octobre', 'novembre', 'decembre',
+    'janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet',
+    'août', 'septembre', 'octobre', 'novembre', 'décembre',
   ];
-  static const _ordinals = ['La plus recente', 'Ensuite', 'Puis'];
+  static const _ordinals = ['La plus récente', 'Ensuite', 'Puis'];
 
   Future<void> run() async {
     final gate = AuthGate(speak: speak, listen: listen);
     if (!await gate.biometric('Consulter votre historique')) {
-      await speak('Identite non confirmee. L\'historique n\'est pas communique.');
+      await speak('Identité non confirmée. L\'historique n\'est pas communiqué.');
       return;
     }
 
     final entries = await TransferService.getHistory(limit: 3);
     if (entries == null) {
       await speak(
-        'Impossible de lire votre historique. Verifiez votre connexion '
-        'internet, puis reessayez.',
+        'Impossible de lire votre historique. Vérifiez votre connexion '
+        'internet, puis réessayez.',
       );
       return;
     }
     if (entries.isEmpty) {
-      await speak('Vous n\'avez aucune operation enregistree.');
+      await speak('Vous n\'avez aucune opération enregistrée.');
       return;
     }
 
     await speak(
       entries.length == 1
-          ? 'Vous avez une operation.'
-          : 'Voici vos ${entries.length} dernieres operations.',
+          ? 'Vous avez une opération.'
+          : 'Voici vos ${entries.length} dernières opérations.',
     );
 
     for (var i = 0; i < entries.length; i++) {
@@ -51,8 +51,8 @@ class HistoryFlow {
       final d = e.date.toLocal();
       final when = '${d.day} ${_months[d.month - 1]}';
       final direction = e.sent
-          ? 'Virement envoye de ${speakAmount(e.amount)} a ${e.otherName}'
-          : 'Virement recu de ${speakAmount(e.amount)} de ${e.otherName}';
+          ? 'Virement envoyé de ${speakAmount(e.amount)} à ${e.otherName}'
+          : 'Virement reçu de ${speakAmount(e.amount)} de ${e.otherName}';
       final last4 = e.otherAccount.length > 4
           ? e.otherAccount.substring(e.otherAccount.length - 4)
           : e.otherAccount;

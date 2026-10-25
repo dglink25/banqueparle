@@ -1,4 +1,5 @@
 import '../utils/text_normalize.dart';
+import 'grammars.dart';
 
 /// -----------------------------------------------------------------------
 /// Dialogue vocal generique (question, ecoute, relance si silence).
@@ -21,6 +22,12 @@ typedef ListenFn = Future<String?> Function();
 class ListenHint {
   ListenHint._();
   static bool shortAnswer = false;
+
+  /// Vocabulaire restreint de la reponse attendue (voir grammars.dart).
+  /// S'il est defini, l'ecoute utilise le moteur hors ligne Vosk, bien
+  /// plus fiable que la reconnaissance generaliste sur un petit nombre de
+  /// mots et sur un accent. Null : ecoute libre (noms, dates, montants).
+  static List<String>? grammar;
 }
 
 /// Pose une question et attend une réponse. Si rien n'est entendu, relance
@@ -32,6 +39,7 @@ Future<String?> askWithRetry({
   required String question,
   int maxRetries = 5,
   bool shortAnswer = false,
+  List<String>? grammar,
   String? retryQuestion,
 }) async {
   for (var attempt = 0; attempt <= maxRetries; attempt++) {
@@ -43,11 +51,13 @@ Future<String?> askWithRetry({
       await speak('Je n\'ai pas bien entendu. ${retryQuestion ?? question}');
     }
     ListenHint.shortAnswer = shortAnswer;
+    ListenHint.grammar = grammar;
     String? answer;
     try {
       answer = await listen();
     } finally {
       ListenHint.shortAnswer = false;
+      ListenHint.grammar = null;
     }
     if (answer != null && answer.trim().isNotEmpty) {
       return answer.trim();
@@ -147,18 +157,20 @@ Future<bool?> askYesNo({
     if (attempt == 0) {
       prompt = '$question $hint';
     } else if (heardSomethingUnclear) {
-      prompt = 'Je n\'ai pas compris votre reponse. $simpleHint';
+      prompt = 'Je n\'ai pas compris votre réponse. $simpleHint';
     } else {
       prompt = 'Je n\'ai pas entendu. $question $simpleHint';
     }
     await speak(prompt);
 
     ListenHint.shortAnswer = true; // reponse breve attendue
+    ListenHint.grammar = kYesNoGrammar;
     String? answer;
     try {
       answer = await listen();
     } finally {
       ListenHint.shortAnswer = false;
+      ListenHint.grammar = null;
     }
     if (answer == null || answer.trim().isEmpty) {
       heardSomethingUnclear = false;

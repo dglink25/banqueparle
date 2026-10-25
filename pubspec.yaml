@@ -33,7 +33,12 @@ dependencies:
   flutter_local_notifications: ^18.0.1
 
   # --- Gestion des permissions (micro, notifications, ignorer l'optimisation batterie) ---
-  permission_handler: ^11.3.1
+  permission_handler: '>=11.3.1 <14.0.0'
+
+  # --- Reconnaissance vocale hors ligne (mot-cle, oui/non, menu) ---
+  # Moteur Vosk avec vocabulaire restreint : tolere bien mieux les accents
+  # que la reconnaissance generaliste, et fonctionne sans internet.
+  vosk_flutter: ^0.3.48
 
   # --- Utilitaires ---
   shared_preferences: ^2.3.3
@@ -50,3 +55,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/
+    - assets/models/

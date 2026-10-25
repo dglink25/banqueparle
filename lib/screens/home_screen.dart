@@ -40,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _heardTimer;
   String _lastHeard = '';
   String _lastDbError = '';
+  String _voiceStatus = '';
   _ScreenState _state = _ScreenState.idle;
   BankIntent _activeIntent = BankIntent.none;
   bool _enrolled = false;
@@ -63,7 +64,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _speech.initialize();
+    // Moteur de repli (Google). On memorise ses erreurs reelles
+    // (reseau, langue, permission) : elles expliquent un "silence".
+    _speech.initialize(onError: (e) {
+      final message = e.errorMsg;
+      if (message != 'error_no_match' && message != 'error_speech_timeout') {
+        unawaited(OnboardingStorage.setLastHeard(
+          '(erreur du moteur Google : $message)',
+        ));
+      }
+    });
     _refreshEnrolled();
 
     final service = FlutterBackgroundService();
@@ -82,10 +92,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _heardTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
       final heard = await OnboardingStorage.getLastHeard();
       final dbError = await OnboardingStorage.getLastDbError();
-      if (mounted && (heard != _lastHeard || dbError != _lastDbError)) {
+      final voice = await OnboardingStorage.getVoiceStatus();
+      if (mounted &&
+          (heard != _lastHeard ||
+              dbError != _lastDbError ||
+              voice != _voiceStatus)) {
         setState(() {
           _lastHeard = heard;
           _lastDbError = dbError;
+          _voiceStatus = voice;
         });
       }
     });
@@ -247,7 +262,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _runSecurity() async {
     setState(() {
       _state = _ScreenState.securityStep;
-      _statusText = 'Configuration de la securite de votre compte...';
+      _statusText = 'Configuration de la sécurité de votre compte...';
     });
 
     // Active le compte bancaire cote base de donnees. En cas d'echec
@@ -276,8 +291,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await OnboardingStorage.setCompleted(true);
         final greetingName = (name != null && name.isNotEmpty) ? ' $name' : '';
         await TtsService.instance.speak(
-          'Bienvenue$greetingName. Votre enrolement est termine. '
-          'Utilisez le pave numerique a l\'ecran, ou dites "Banque '
+          'Bienvenue$greetingName. Votre enrôlement est terminé. '
+          'Utilisez le pavé numérique à l\'écran, ou dites "Banque '
           'Parlante" suivi de votre demande.',
         );
       }
@@ -288,8 +303,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _state = _ScreenState.idle;
         _statusText = _enrolled
-            ? 'Dites "Banque Parlante" ou utilisez le pave numerique.'
-            : 'Redites "Banque Parlante" pour terminer la securite.';
+            ? 'Dites "Banque Parlante" ou utilisez le pavé numérique.'
+            : 'Redites "Banque Parlante" pour terminer la sécurité.';
       });
     }
   }
@@ -404,11 +419,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case BankIntent.balance:
         return 'Consultation du solde...';
       case BankIntent.history:
-        return 'Historique des operations...';
+        return 'Historique des opérations...';
       case BankIntent.transfer:
         return 'Virement en cours...';
       case BankIntent.otp:
-        return 'Code de securite...';
+        return 'Code de sécurité...';
       case BankIntent.profile:
         return 'Gestion du profil...';
       case BankIntent.advisor:
@@ -441,8 +456,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case BankIntent.otp:
         if (!await _ensureProvisioned(speak: speak)) {
           await speak(
-            'Votre compte bancaire n\'est pas encore active. Verifiez '
-            'votre connexion internet puis reessayez.',
+            'Votre compte bancaire n\'est pas encore activé. Vérifiez '
+            'votre connexion internet puis réessayez.',
           );
           break;
         }
@@ -517,7 +532,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (_) {
       try {
         await TtsService.instance.speak(
-          'Une erreur est survenue. Veuillez reessayer.',
+          'Une erreur est survenue. Veuillez réessayer.',
         );
       } catch (_) {}
     } finally {
@@ -530,7 +545,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           setState(() {
             _state = _ScreenState.idle;
             _statusText =
-                'Dites "Banque Parlante" ou utilisez le pave numerique.';
+                'Dites "Banque Parlante" ou utilisez le pavé numérique.';
           });
         }
       }
@@ -597,7 +612,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               if (_lastHeard.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(
-                  'Derniere phrase entendue : "$_lastHeard"',
+                  'Dernière phrase entendue : "$_lastHeard"',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: AppColors.blue, fontSize: 12),
+                ),
+              ],
+              if (_voiceStatus.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  _voiceStatus,
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: AppColors.blue, fontSize: 12),
                 ),
@@ -605,7 +628,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               if (_lastDbError.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(
-                  'Derniere erreur base : $_lastDbError',
+                  'Dernière erreur base : $_lastDbError',
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: AppColors.blue, fontSize: 12),
                 ),
@@ -623,7 +646,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const Padding(
                   padding: EdgeInsets.only(bottom: 8),
                   child: Text(
-                    'Le pave numerique sera disponible apres l\'enrolement.',
+                    'Le pavé numérique sera disponible après l\'enrôlement.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: AppColors.blue, fontSize: 13),
                   ),
@@ -637,7 +660,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Text(
-                  'Ecoute active en arriere-plan',
+                  'Écoute active en arrière-plan',
                   style: TextStyle(color: AppColors.blue, fontSize: 13),
                 ),
               ),
@@ -646,7 +669,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 onPressed: () =>
                     kNativeChannel.invokeMethod('openFullScreenIntentSettings'),
                 child: const Text(
-                  'Autoriser l\'ouverture automatique (reglages systeme)',
+                  'Autoriser l\'ouverture automatique (réglages système)',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppColors.blue),
                 ),

@@ -48,7 +48,7 @@ class AccountProvisioningService {
     if (!isConfigured) {
       return ProvisioningResult(
         false,
-        'La base de donnees n\'est pas configuree sur cette build.',
+        'La base de données n\'est pas configurée sur cette build.',
       );
     }
 
@@ -78,13 +78,13 @@ class AccountProvisioningService {
       await _storage.write(key: 'db_role_password', value: password);
 
       await OnboardingStorage.setLastDbError('');
-      return ProvisioningResult(true, 'Compte bancaire active avec succes.');
+      return ProvisioningResult(true, 'Compte bancaire activé avec succès.');
     } catch (e) {
       final msg = e.toString();
       if (msg.contains('ACCOUNT_ALREADY_EXISTS')) {
         return ProvisioningResult(
           false,
-          'Ce numero de compte est deja enregistre.',
+          'Ce numéro de compte est déjà enregistré.',
         );
       }
       // Dit la vraie cause (base introuvable, script non execute,

@@ -27,7 +27,7 @@ class TransferService {
 
   /// Ouvre une connexion avec le role du client, execute [action], puis
   /// referme toujours la connexion. Renvoie null si la base n'est pas
-  /// configuree ou si le compte n'est pas encore active sur ce telephone.
+  /// configuree ou si le compte n'est pas encore activé sur ce telephone.
   static Future<T?> _withConnection<T>(
     Future<T> Function(Connection conn) action,
   ) async {
@@ -80,13 +80,13 @@ class TransferService {
       if (balance == null) {
         return TransferResult(
           false,
-          'Votre compte n\'est pas encore active pour les operations '
+          'Votre compte n\'est pas encore activé pour les opérations '
           'bancaires.',
         );
       }
       return TransferResult(
         true,
-        'Virement effectue avec succes.',
+        'Virement effectué avec succès.',
         newBalance: balance,
       );
     } catch (e) {
@@ -146,7 +146,7 @@ class TransferService {
       if (code == null) {
         return OtpResult(
           null,
-          'Votre compte n\'est pas encore active pour les operations '
+          'Votre compte n\'est pas encore activé pour les opérations '
           'bancaires.',
         );
       }
@@ -188,16 +188,16 @@ class TransferService {
       return 'Solde insuffisant pour effectuer ce virement.';
     }
     if (raw.contains('RECIPIENT_NOT_FOUND')) {
-      return 'Ce numero de compte destinataire est introuvable.';
+      return 'Ce numéro de compte destinataire est introuvable.';
     }
     if (raw.contains('SAME_ACCOUNT')) {
       return 'Impossible de faire un virement vers votre propre compte.';
     }
     if (raw.contains('INVALID_AMOUNT')) {
-      return 'Le montant indique n\'est pas valide.';
+      return 'Le montant indiqué n\'est pas valide.';
     }
     // Erreur technique (reseau, base, identifiants) : dit la vraie cause.
-    return 'Le virement a echoue. ${describeDbError(error).spoken}';
+    return 'Le virement a échoué. ${describeDbError(error).spoken}';
   }
 }
 

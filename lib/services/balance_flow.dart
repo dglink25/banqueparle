@@ -14,15 +14,15 @@ class BalanceFlow {
   Future<void> run() async {
     final gate = AuthGate(speak: speak, listen: listen);
     if (!await gate.biometric('Consulter votre solde')) {
-      await speak('Identite non confirmee. Le solde n\'est pas communique.');
+      await speak('Identité non confirmée. Le solde n\'est pas communiqué.');
       return;
     }
 
     final balance = await TransferService.getBalance();
     if (balance == null) {
       await speak(
-        'Impossible de lire votre solde. Verifiez votre connexion '
-        'internet, puis reessayez.',
+        'Impossible de lire votre solde. Vérifiez votre connexion '
+        'internet, puis réessayez.',
       );
       return;
     }

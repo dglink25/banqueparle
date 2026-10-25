@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'services/wake_word_service.dart';
 import 'services/tts_service.dart';
+import 'services/vosk_engine.dart';
 import 'utils/app_colors.dart';
 import 'utils/permissions_helper.dart';
 import 'screens/home_screen.dart';
@@ -17,6 +20,11 @@ Future<void> main() async {
   // 3. Démarre le service d'arrière-plan qui écoute en continu le
   //    mot-clé « Banque Parlante », y compris application fermée.
   await initializeWakeWordService();
+
+  // Extrait le modele de reconnaissance hors ligne (premiere ouverture :
+  // quelques dizaines de secondes). Sans bloquer l'affichage ; le service
+  // d'arriere-plan le charge des qu'il est pret.
+  unawaited(VoskEngine.prepareModelFromAssets());
 
   runApp(const BanqueParleApp());
 }

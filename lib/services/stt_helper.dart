@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../utils/onboarding_storage.dart';
+import 'vosk_engine.dart';
 import 'voice_dialog.dart';
 
 /// Ecoute la reponse de l'utilisateur et renvoie le texte reconnu, ou null
@@ -37,6 +38,26 @@ Future<String?> sttListenOnce(
   bool? shortAnswer,
   bool Function()? shouldStop,
 }) async {
+  // Vocabulaire connu : ecoute hors ligne Vosk (fiable, tolerante a
+  // l'accent). Si le moteur n'est pas disponible, on se replie sur le
+  // moteur Google ci-dessous, comme avant.
+  final grammar = ListenHint.grammar;
+  if (grammar != null) {
+    final outcome = await VoiceRouter.listenConstrained(
+      grammar: grammar,
+      timeout: timeout,
+      shouldStop: shouldStop,
+    );
+    if (!outcome.unavailable) {
+      final heard = outcome.text;
+      debugPrint('[Vosk] entendu : "$heard"');
+      unawaited(OnboardingStorage.setLastHeard(
+        heard == null ? '(silence)' : '[hors ligne] $heard',
+      ));
+      return heard;
+    }
+  }
+
   final short = shortAnswer ?? ListenHint.shortAnswer;
   final pause = pauseFor ??
       (short ? const Duration(seconds: 2) : const Duration(seconds: 4));

@@ -15,7 +15,7 @@ class AdvisorFlow {
   Future<void> run() async {
     if (phone.trim().isEmpty) {
       await speak(
-        'Le numero du centre de relation client n\'est pas configure dans '
+        'Le numéro du centre de relation client n\'est pas configuré dans '
         'cette version de l\'application.',
       );
       return;
@@ -24,7 +24,7 @@ class AdvisorFlow {
     try {
       await kNativeChannel.invokeMethod('callPhone', {'number': phone});
     } catch (_) {
-      await speak('Impossible de lancer l\'appel sur ce telephone.');
+      await speak('Impossible de lancer l\'appel sur ce téléphone.');
     }
   }
 }

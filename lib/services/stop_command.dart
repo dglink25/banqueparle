@@ -67,8 +67,8 @@ ListenFn interceptStop(ListenFn inner) => () async {
 
 /// Phrase de confirmation.
 const String kStopConfirmQuestion =
-    'Vous etes sur de vouloir arreter Banque Parlante ?';
+    'Vous êtes sûr de vouloir arrêter Banque Parlante ?';
 
 /// Phrase dite une fois l'arret confirme.
 const String kStoppedMessage =
-    'Banque Parlante est arrete. Pour me relancer, dites "Banque Parlante".';
+    'Banque Parlante est arrêté. Pour me relancer, dites "Banque Parlante".';

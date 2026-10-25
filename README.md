@@ -1,541 +1,461 @@
 # BanqueParle
 
-Application bancaire mobile Flutter pilotee par la voix, concue pour
-l'accessibilite. Elle detecte en permanence le mot-cle "Banque
-Parlante", enrole le client a la voix (identite, compte, securite) et
-permet d'effectuer des virements instantanes entre comptes.
+Application bancaire mobile pilotée par la voix, conçue pour les personnes
+malvoyantes. Elle écoute en permanence le mot-clé « Banque Parlante »,
+enrôle le client à la voix (identité, compte, sécurité) et permet de
+consulter son solde, son historique, de faire des virements instantanés
+entre comptes, d'obtenir un code à usage unique, de gérer son profil et
+d'appeler un conseiller.
 
 ## Sommaire
 
-1. Telechargement de l'application
-2. Premiere utilisation et configuration du telephone
-3. Base de donnees Neon et securite des virements
-4. Configuration du depot GitHub (secrets)
-5. Fonctionnalites
-6. Compatibilite et limites connues
-7. Structure du depot
-8. Charte graphique
+1. Téléchargement
+2. Configuration unique du téléphone
+3. Utilisation à la voix
+4. Moteur de reconnaissance vocale
+5. Base de données Neon
+6. Secrets GitHub
+7. Sécurité
+8. Compatibilité et limites connues
+9. Structure du dépôt
+10. Charte graphique
 
 ---
 
-## 1. Telechargement de l'application
+## 1. Téléchargement
 
-A chaque push sur la branche `main`, GitHub Actions construit l'APK,
-le renomme `banqueparle.apk`, supprime l'ancienne version et publie la
-nouvelle sous une adresse qui ne change jamais :
+À chaque push sur la branche `main`, GitHub Actions construit l'APK, le
+renomme `banqueparle.apk`, supprime l'ancienne version et publie la nouvelle
+sous une adresse qui ne change jamais :
 
-    https://github.com/<utilisateur>/<depot>/releases/download/latest/banqueparle.apk
+    https://github.com/<utilisateur>/<dépôt>/releases/download/latest/banqueparle.apk
 
-Remplacer `<utilisateur>` et `<depot>` par ceux du depot. Ce lien
-fonctionne sans compte GitHub et pointe toujours vers la derniere
-version. Il n'existe jamais qu'une seule version publiee. Le lien est
-aussi affiche dans le resume de chaque execution du workflow (onglet
-Actions).
+Ce lien fonctionne sans compte GitHub et pointe toujours vers la dernière
+version. Il est aussi affiché dans le résumé de chaque exécution du workflow
+(onglet Actions).
 
-Installation : ouvrir le lien sur le telephone, telecharger le fichier,
-l'ouvrir, et autoriser l'installation depuis cette source si Android le
-demande.
+L'APK est volumineux (environ 100 Mo) : il embarque le modèle de
+reconnaissance vocale hors ligne (section 4). Le téléchargement se fait une
+seule fois ; ensuite, la reconnaissance vocale n'a pas besoin d'internet.
 
 ---
 
-## 2. Premiere utilisation et configuration du telephone
+## 2. Configuration unique du téléphone
 
-L'application doit pouvoir tourner en arriere-plan en permanence pour
-entendre le mot-cle, et s'ouvrir seule a l'ecran quand elle l'entend.
-Android restreint les deux par defaut. Sans les reglages ci-dessous, le
-telephone repond a la voix mais l'ecran ne s'allume pas, ou l'ecoute
-s'arrete apres quelques minutes. Ce n'est pas un defaut de
-l'application : ce sont des protections du systeme que seul
-l'utilisateur peut lever, une fois.
+Android restreint par défaut ce dont l'application a besoin : écouter en
+permanence et s'ouvrir toute seule. Sans les réglages ci-dessous, le
+téléphone répond à la voix mais l'écran ne s'allume pas, ou l'écoute
+s'arrête après quelques minutes. Ce ne sont pas des défauts de
+l'application, mais des protections du système que seul l'utilisateur peut
+lever.
 
-### Etape A - Permissions demandees au premier lancement
+**Cette configuration se fait une seule fois, de préférence avec l'aide
+d'une personne voyante. Ensuite, tout se fait à la voix.**
 
-Accepter : Microphone, Notifications, et "Ne pas optimiser la batterie"
-pour BanqueParle.
+### Étape A - Premier lancement
 
-### Etape B - Autoriser l'ouverture automatique de l'ecran
+1. Ouvrir BanqueParle (icône).
+2. Accepter les autorisations demandées : Microphone, Notifications,
+   Téléphone, et « Ne pas optimiser la batterie ».
+3. **Attendre environ 30 secondes** au premier lancement : l'application
+   prépare le modèle de reconnaissance vocale. L'écran indique « Moteur
+   vocal : Vosk hors ligne actif » quand c'est prêt.
 
-Depuis Android 14, une notification n'a plus le droit d'ouvrir une
-application toute seule, sauf autorisation explicite.
+### Étape B - Autoriser l'ouverture automatique de l'écran
 
-Methode rapide :
-1. Ouvrir BanqueParle (icone).
-2. Appuyer sur "Autoriser l'ouverture automatique (reglages systeme)".
-3. Activer l'interrupteur en face de BanqueParle.
+Depuis Android 14, une notification ne peut plus ouvrir une application
+toute seule sans autorisation explicite. Dans l'application, appuyer sur
+« Autoriser l'ouverture automatique (réglages système) », puis activer
+l'interrupteur en face de BanqueParle.
 
-Methode manuelle : Parametres > Applications > BanqueParle >
-Notifications > "Notifications plein ecran" (ou "Autoriser les
-notifications plein ecran"). Selon la marque, l'option peut aussi se
-trouver dans Parametres > Applications > Acces speciaux des
-applications > Notifications plein ecran.
+Chemin manuel : Paramètres > Applications > BanqueParle > Notifications >
+« Notifications plein écran ». Selon la marque, l'option peut aussi se
+trouver dans Paramètres > Applications > Accès spécial.
 
-Android 13 et anterieur : aucun reglage necessaire pour cette etape.
+Android 13 et antérieur : aucun réglage nécessaire pour cette étape.
 
-### Etape C - Autoriser le fonctionnement en arriere-plan (selon la marque)
+### Étape C - Fonctionnement en arrière-plan, selon la marque
 
-Chaque constructeur ajoute son propre gestionnaire d'energie qui tue
-les applications en arriere-plan. Les libelles varient un peu selon la
-version ; chercher l'option equivalente.
+Chaque constructeur ajoute un gestionnaire d'énergie qui arrête les
+applications en arrière-plan. Les libellés varient un peu selon la version.
 
-Samsung (One UI)
-- Parametres > Applications > BanqueParle > Batterie > "Sans
-  restriction".
-- Parametres > Batterie > Limites d'utilisation en arriere-plan >
-  Applications jamais en veille : ajouter BanqueParle.
-- Retirer BanqueParle de "Applications en veille prolongee" si present.
+**Samsung (One UI)** : Paramètres > Applications > BanqueParle > Batterie >
+« Sans restriction ». Paramètres > Batterie > Limites d'utilisation en
+arrière-plan > Applications jamais en veille : ajouter BanqueParle.
 
-Xiaomi, Redmi, POCO (MIUI / HyperOS)
-- Parametres > Applications > Gerer les applications > BanqueParle >
-  Demarrage automatique : activer.
-- Meme ecran > Economiser la batterie > "Aucune restriction".
-- Parametres > Applications > Autorisations > Autres autorisations >
-  "Afficher sur ecran de verrouillage" et "Afficher les fenetres
-  contextuelles en arriere-plan" : autoriser.
-- Dans la liste des applications recentes, verrouiller BanqueParle
-  (appui long sur la vignette, puis icone de cadenas).
+**Xiaomi, Redmi, POCO (MIUI, HyperOS)** : Paramètres > Applications > Gérer
+les applications > BanqueParle > Démarrage automatique : activer ; puis
+Économiser la batterie > « Aucune restriction ». Autorisations > Autres
+autorisations : « Afficher sur l'écran de verrouillage » et « Afficher les
+fenêtres contextuelles en arrière-plan ». Dans les applications récentes,
+verrouiller BanqueParle (appui long sur la vignette, puis cadenas).
 
-Huawei, Honor (EMUI / MagicOS)
-- Parametres > Batterie > Lancement d'applications > BanqueParle >
-  desactiver la gestion automatique, puis activer "Lancement
-  automatique", "Lancement secondaire" et "Executer en arriere-plan".
-- Appareils recents sans services Google : voir la section 6.
+**Huawei, Honor (EMUI, MagicOS)** : Paramètres > Batterie > Lancement
+d'applications > BanqueParle > désactiver la gestion automatique, puis
+activer « Lancement automatique », « Lancement secondaire » et « Exécuter en
+arrière-plan ».
 
-Oppo, Realme, OnePlus (ColorOS / OxygenOS)
-- Parametres > Applications > Gestion des applications > BanqueParle >
-  Utilisation de la batterie > "Autoriser l'activite en arriere-plan"
-  et "Autoriser le lancement automatique".
-- Parametres > Batterie > Plus de parametres > desactiver
-  "Optimiser en veille".
+**Oppo, Realme, OnePlus (ColorOS, OxygenOS)** : Paramètres > Applications >
+Gestion des applications > BanqueParle > Utilisation de la batterie >
+« Autoriser l'activité en arrière-plan » et « Autoriser le lancement
+automatique ». Paramètres > Batterie : désactiver « Optimiser en veille ».
 
-Vivo, iQOO (Funtouch OS / OriginOS)
-- Parametres > Batterie > Consommation en arriere-plan > BanqueParle >
-  "Autoriser".
-- Parametres > Applications > Demarrage automatique : activer
-  BanqueParle.
+**Vivo, iQOO (Funtouch OS, OriginOS)** : Paramètres > Batterie >
+Consommation en arrière-plan > BanqueParle > « Autoriser ». Paramètres >
+Applications > Démarrage automatique : activer BanqueParle.
 
-Google Pixel, Motorola, Nokia, Android One (Android pur)
-- Parametres > Applications > BanqueParle > Batterie > "Sans
-  restriction". Aucun reglage constructeur supplementaire.
+**Google Pixel, Motorola, Nokia (Android pur)** : Paramètres > Applications >
+BanqueParle > Batterie > « Sans restriction ».
 
-Tecno, Infinix, Itel (HiOS / XOS)
-- Gestionnaire du telephone (Phone Master) > Gestion de l'energie ou
-  Demarrage automatique : autoriser BanqueParle.
-- Parametres > Batterie > Optimisation de la batterie : BanqueParle sur
-  "Ne pas optimiser".
+**Tecno, Infinix, Itel (HiOS, XOS)** : Gestionnaire du téléphone > Gestion de
+l'énergie ou Démarrage automatique : autoriser BanqueParle. Paramètres >
+Batterie > Optimisation : « Ne pas optimiser » pour BanqueParle.
 
-### Etape D - Apres un redemarrage du telephone
+### Étape D - Après un redémarrage du téléphone
 
-Depuis Android 15, le systeme interdit de relancer automatiquement au
-demarrage un service qui utilise le microphone. Apres chaque
-redemarrage, ouvrir BanqueParle une fois : l'ecoute reprend et ne
-s'arrete plus tant que le telephone reste allume.
+Depuis Android 15, le système interdit de relancer automatiquement au
+démarrage un service qui utilise le microphone. Après chaque redémarrage,
+ouvrir BanqueParle une fois : l'écoute reprend et ne s'arrête plus tant que
+le téléphone reste allumé.
 
-### Si l'ecran ne s'allume toujours pas
+### Si l'écran ne s'allume toujours pas
 
-La reponse vocale fonctionne meme dans ce cas : l'application parle
-sans avoir besoin de l'ecran. L'ecran n'est indispensable que pour
-l'etape de l'empreinte digitale (Android n'affiche l'invite biometrique
-que sur un ecran visible), donc pour toutes les fonctions protegees par
-l'empreinte : solde, historique, virement et code OTP. Le profil, le
-conseiller et l'arret ne l'exigent pas. Verifier alors, dans l'ordre : etape B, etape C, puis
-Parametres > Applications > BanqueParle > Autorisations > Microphone sur
-"Autoriser tout le temps" si l'option existe.
+La réponse vocale fonctionne même dans ce cas : l'application parle sans
+avoir besoin de l'écran. L'écran n'est indispensable que pour l'empreinte
+digitale (Android n'affiche l'invite biométrique que sur un écran visible),
+donc pour le solde, l'historique, le virement et le code à usage unique.
+Le profil, le conseiller et l'arrêt ne l'exigent pas. Vérifier alors, dans
+l'ordre : étape B, étape C, puis Paramètres > Applications > BanqueParle >
+Autorisations > Microphone sur « Autoriser tout le temps » si l'option existe.
 
 ---
 
-## 3. Base de donnees Neon et securite des virements
+## 3. Utilisation à la voix
 
-Les comptes et les virements sont stockes dans une base PostgreSQL
-hebergee sur Neon. Aucun serveur applicatif n'est deploye : l'application
-se connecte directement a Neon.
+Dire « Banque Parlante », puis la demande, dans la même phrase ou après la
+question « Que souhaitez-vous faire ? ». Exemples : « Banque Parlante
+solde », « Banque Parlante trois ». L'application annonce ce qu'elle a
+compris (« D'accord : consulter le solde ») avant d'agir.
 
-### Pourquoi c'est sur malgre l'absence de serveur
+Le pavé numérique affiché à l'écran offre les mêmes commandes par touche.
+Un appui interrompt aussitôt la voix, l'écoute et l'invite d'empreinte en
+cours, puis lance la nouvelle commande.
 
-Une application qui se connecterait avec un identifiant partage
-permettrait a quiconque decompile l'APK de lire ou modifier les soldes
-de tous les clients. Pour l'eviter, toute la logique sensible est
-dans la base elle-meme (`sql/schema.sql`), sous forme de fonctions
-`SECURITY DEFINER` :
+| Touche | Commande               | Mots reconnus                      | Sécurité exigée        |
+|--------|------------------------|------------------------------------|------------------------|
+| 1      | Consulter le solde     | solde                              | Biométrie              |
+| 2      | Historique             | historique                         | Biométrie              |
+| 3      | Effectuer un virement  | virement, transfert                | Biométrie forte        |
+| 4      | Code OTP               | code, code de sécurité             | Biométrie              |
+| 5      | Gestion du profil      | profil                             | Optionnelle            |
+| 6      | Contacter un conseiller| conseiller                         | Aucune                 |
+| 0      | Arrêter                | stop, arrête, zéro                 | Confirmation 1 ou 2    |
 
-- Chaque client possede son propre role PostgreSQL, cree
-  automatiquement a l'enrolement, avec un mot de passe aleatoire
-  conserve uniquement dans le stockage chiffre du telephone.
-- Ce role n'a aucun droit direct de lecture ou d'ecriture sur les
-  tables. Il ne peut qu'executer `transfer_funds()` et `get_balance()`.
-- `transfer_funds()` determine elle-meme le compte emetteur a partir du
-  role connecte : un role compromis ne peut deplacer que l'argent de
-  son propre compte, jamais celui d'un autre.
-- Le virement est une transaction atomique avec verrouillage des deux
-  comptes : pas de double depense, pas de debit sans credit.
-- Le credit du destinataire est immediat : des que la transaction est
-  validee, le destinataire voit son nouveau solde.
-- Avant chaque virement, l'application redemande l'empreinte digitale
-  (ou le code secret en repli).
+1. **Solde** : identité vérifiée, puis lecture du solde avec les centimes.
+2. **Historique** : les trois dernières opérations, de la plus récente à la
+   plus ancienne : sens, montant, nom du correspondant, quatre derniers
+   chiffres de son compte, date. Un prélèvement est un débit : il apparaît
+   comme un virement envoyé.
+3. **Virement** : numéro du destinataire et montant dictés puis confirmés
+   oralement, empreinte ET code secret, virement instantané, annonce du
+   nouveau solde. Les montants avec centimes sont compris (« 12,50 »).
+4. **Code OTP** : code de six chiffres généré par la base de données,
+   valable cinq minutes, à usage unique, dicté chiffre par chiffre et
+   répétable. Cinq codes maximum par période de dix minutes.
+5. **Profil** : lecture du nom, de la date de naissance, du téléphone, de la
+   fin du numéro de compte, du type de compte, des empreintes et de l'état du
+   code secret ; modification du nom, du téléphone, de la date de naissance
+   et du code secret (l'ancien code est exigé).
+6. **Conseiller** : appel direct du centre de relation client (numéro fourni
+   à la compilation, section 6). Si la permission d'appel est accordée,
+   l'appel part seul ; sinon le numéro est prénuméroté dans le composeur.
 
-Le seul identifiant present dans l'APK est celui du role
-`banqueparle_provisioner`, qui peut uniquement appeler
-`create_customer_role()`. Il ne peut lire aucun solde.
+### Arrêt d'urgence
+
+À tout moment, « Banque Parlante arrête », « Banque Parlante stop », « stop »,
+« arrête », « 0 » ou « zéro » (ou la touche 0 de l'écran) coupent l'activité en
+cours, puis l'application demande : « Vous êtes sûr de vouloir arrêter Banque
+Parlante ? Dites 1 pour oui, ou 2 pour non. »
+
+- **Oui** : « Banque Parlante est arrêté », l'application se ferme en
+  arrière-plan. L'écoute du mot-clé continue : dire « Banque Parlante » la
+  relance.
+- **Non** : « D'accord, on reprend », et l'activité repart du début de son
+  parcours.
+- **Sans réponse claire après trois essais** : l'arrêt est exécuté. Il a été
+  demandé, et il peut s'agir d'une urgence.
+
+« Zéro » est un chiffre légitime dans un code PIN ou un numéro de compte :
+l'arrêt n'est déclenché que si toute la réponse est une commande d'arrêt. Un
+code dicté « 0 0 0 0 » ne déclenche rien.
+
+Limite : la commande vocale est entendue quand l'application écoute, donc
+après chaque question. Pendant qu'elle parle, le micro est fermé (sinon elle
+s'entendrait elle-même). Pour couper immédiatement une longue annonce,
+utiliser la touche 0 de l'écran.
+
+### Enrôlement (premier usage)
+
+Questions posées une à une, avec confirmation orale des réponses sensibles et
+relance si le silence dure dix secondes :
+
+- Identité : nom complet, date de naissance, numéro de téléphone.
+- Compte : numéro de compte, type de compte.
+- Sécurité : empreinte digitale (jusqu'à trois), puis code secret à quatre
+  chiffres obligatoire.
+
+Chaque réponse est enregistrée aussitôt : si l'enrôlement est interrompu,
+redire le mot-clé reprend à la question suivante. L'adresse e-mail n'est pas
+demandée par la voix : dicter une adresse (arobase, points) est trop peu
+fiable pour un canal de sécurité.
+
+---
+
+## 4. Moteur de reconnaissance vocale
+
+### Pourquoi deux moteurs
+
+- **Vosk (hors ligne)** pour tout ce qui a un vocabulaire connu : le
+  mot-clé, oui/non, le menu. Le moteur n'écoute que ces mots et choisit
+  parmi quelques candidats au lieu de deviner n'importe quelle phrase : il
+  tolère donc beaucoup mieux l'accent, et il fonctionne sans internet.
+- **Google** (repli) pour le texte libre : nom, date de naissance, montant,
+  numéros. Ce moteur exige internet et est entraîné sur des accents
+  standards.
+
+Si Vosk n'est pas disponible (modèle pas encore préparé, erreur), tout
+retombe automatiquement sur Google, comme avant. L'écran affiche l'état du
+moteur et, en petit, « Dernière phrase entendue » : le texte exact reconnu,
+précieux pour diagnostiquer un téléphone donné.
+
+### Détails techniques
+
+- Modèle : `vosk-model-small-fr-0.22` (41 Mo, licence Apache 2.0), téléchargé
+  par le workflow à chaque build et intégré à l'APK. Il est extrait au premier
+  lancement dans le stockage de l'application.
+- Un seul modèle est chargé, dans le service d'arrière-plan, qui possède le
+  micro. L'écran lui délègue ses écoutes par messages. Mémoire : prévoir
+  environ 300 Mo de RAM disponibles.
+- Le vocabulaire (`lib/services/grammars.dart`) contient toujours `[unk]` :
+  sans lui, le moteur reste bloqué dès qu'un son sort de la grammaire.
+- En mode grammaire, Vosk reconnaît parfois les mots sans jamais émettre de
+  résultat final. Un résultat partiel qui reste stable 0,8 seconde est donc
+  accepté.
+- Le build utilise `--no-shrink` (le moteur n'est pas compatible avec la
+  réduction de code R8) et cible les téléphones ARM, ce qui évite de
+  multiplier la taille de l'APK par les bibliothèques x86.
+
+### Reconnaissance des noms
+
+Un nom comme « Houndokinnou Diègue » n'existe dans aucun dictionnaire : le
+moteur libre propose le mot le plus proche (« Don Diègue »). La confirmation
+orale permet de refuser, mais pas d'obtenir l'orthographe exacte. Piste
+retenue : faire saisir le nom exact par la personne qui aide à la
+configuration unique.
+
+---
+
+## 5. Base de données Neon
+
+Les comptes et les virements sont stockés dans une base PostgreSQL hébergée
+sur Neon. Aucun serveur applicatif n'est déployé : l'application se connecte
+directement à Neon.
+
+### Pourquoi c'est sûr malgré l'absence de serveur
+
+Un identifiant partagé intégré à l'application permettrait à quiconque
+décompile l'APK de lire ou modifier les soldes de tous les clients. Pour
+l'éviter, toute la logique sensible vit dans la base (`sql/schema.sql`), sous
+forme de fonctions `SECURITY DEFINER` :
+
+- Chaque client possède son propre rôle PostgreSQL, créé à l'enrôlement, avec
+  un mot de passe aléatoire conservé uniquement dans le stockage chiffré du
+  téléphone.
+- Ce rôle n'a aucun droit direct sur les tables : il ne peut qu'exécuter
+  `transfer_funds()`, `get_balance()`, `get_history()`, `generate_otp()` et
+  `update_owner_name()`.
+- Ces fonctions déterminent elles-mêmes le compte émetteur à partir du rôle
+  connecté (`session_user`) : un rôle compromis ne peut déplacer que l'argent
+  de son propre compte.
+- Le virement est une transaction atomique avec verrouillage des deux comptes
+  dans un ordre fixe : pas de double dépense, pas de blocage mutuel.
+- Le destinataire est crédité immédiatement.
+
+Le seul identifiant présent dans l'APK est celui du rôle
+`banqueparle_provisioner`, qui ne peut que créer un rôle client. Il ne peut
+lire aucun solde.
 
 ### Mise en place (une seule fois)
 
-Le script `sql/schema.sql` doit etre execute dans Neon : il cree les
-tables, les fonctions et le role de provisionnement. Tant qu'il n'a pas
-ete execute, l'application ne peut pas se connecter (le role n'existe
-pas). GitHub n'execute rien dans la base : c'est une etape manuelle.
+GitHub n'exécute rien dans la base : c'est une étape manuelle. Tant que le
+script n'est pas exécuté, le rôle `banqueparle_provisioner` n'existe pas et
+l'application ne peut pas se connecter.
 
-**Etape 1 - Executer le script SQL**
+**Étape 1 - Exécuter le script SQL.** Console Neon > projet > branche
+`production` > éditeur SQL (dans « Base de données Postgres »). Vérifier en
+haut : base `neondb`, rôle `neondb_owner`. Ouvrir `sql/schema.sql` dans
+GitHub (bouton « Raw »), tout copier, coller dans l'éditeur, cliquer sur
+Run. Le script est rejouable : il peut être exécuté de nouveau en entier
+après une mise à jour du fichier. Il faut le rejouer si une ancienne
+version a été exécutée : elle contenait un défaut (`current_user` au lieu de
+`session_user`) qui faisait échouer tout virement et toute lecture de solde.
 
-1. Ouvrir la console Neon, le projet, la branche `production`.
-2. Ouvrir l'editeur SQL (menu de gauche, dans "Base de donnees
-   Postgres" : "Editeur SQL" / "SQL Editor").
-3. En haut de l'editeur, verifier que la base est `neondb` et le role
-   `neondb_owner` (valeurs par defaut).
-4. Ouvrir `sql/schema.sql` dans GitHub, cliquer sur "Raw", tout
-   selectionner et copier.
-5. Coller dans l'editeur SQL, puis cliquer sur "Run".
-6. Un message de succes doit apparaitre. En cas d'erreur, relever le
-   texte et la ligne indiques.
+**Étape 2 - Définir le mot de passe du rôle de provisionnement**, dans le
+même éditeur (mot de passe long, aléatoire, sans apostrophe) :
 
-Le script est rejouable : en cas de doute, ou apres une mise a jour du
-fichier, il peut etre execute de nouveau en entier sans rien casser.
-Il est indispensable de le rejouer si une version anterieure a ete
-executee : elle contenait un defaut (`current_user` au lieu de
-`session_user`) qui faisait echouer tout virement et toute lecture de
-solde.
+    ALTER ROLE banqueparle_provisioner PASSWORD 'un-mot-de-passe-long-et-aléatoire';
 
-**Etape 2 - Definir le mot de passe du role de provisionnement**
-
-Dans le meme editeur, executer (en remplacant par un mot de passe long
-et aleatoire, sans apostrophe) :
-
-    ALTER ROLE banqueparle_provisioner PASSWORD 'un-mot-de-passe-long-et-aleatoire';
-
-**Etape 3 - Verifier l'installation**
+**Étape 3 - Vérifier l'installation** :
 
     SELECT rolname FROM pg_roles
     WHERE rolname IN ('customer_base', 'banqueparle_provisioner', 'banqueparle_otp_verifier');
 
     SELECT proname FROM pg_proc
-    WHERE proname IN ('create_customer_role', 'transfer_funds',
-                      'get_balance', 'get_history', 'generate_otp',
-                      'verify_otp', 'update_owner_name');
+    WHERE proname IN ('create_customer_role', 'transfer_funds', 'get_balance',
+                      'get_history', 'generate_otp', 'verify_otp', 'update_owner_name');
 
-La premiere requete doit renvoyer 3 lignes, la seconde 7.
+La première requête doit renvoyer 3 lignes, la seconde 7.
 
-**Etape 4 - Renseigner les secrets GitHub (section 4)**
+**Étape 4 - Renseigner les secrets GitHub** (section 6). Le rôle à mettre dans
+`NEON_PROVISIONER_USER` est `banqueparle_provisioner`. Ne jamais y mettre
+`neondb_owner` ni le mot de passe affiché dans la fenêtre « Connecter » de
+Neon : ce sont ceux du propriétaire de la base, et tout ce que contient
+l'APK peut être extrait par quiconque le télécharge. Le workflow refuse de
+construire l'APK si le rôle ressemble à un rôle administrateur.
 
-ATTENTION : le role a mettre dans `NEON_PROVISIONER_USER` est
-`banqueparle_provisioner`, avec le mot de passe de l'etape 2. Ne jamais
-y mettre `neondb_owner` ni le mot de passe affiche dans la fenetre
-"Connecter" de Neon : ce sont ceux du proprietaire de la base, et tout ce
-qui est dans l'APK peut etre extrait par quiconque le telecharge. Le
-workflow refuse de construire l'APK si le role ressemble a un role
-administrateur.
+Pour `NEON_HOST`, utiliser l'hôte **direct** : dans la fenêtre « Connecter »,
+désactiver « Mise en commun des connexions », puis copier uniquement le nom
+d'hôte, par exemple `ep-nom-123456.us-east-2.aws.neon.tech`, sans
+`postgresql://`, sans identifiants, sans port.
 
-Pour `NEON_HOST`, utiliser l'hote **direct** : dans la fenetre
-"Connecter" de Neon, desactiver "Mise en commun des connexions"
-(pooling), puis copier uniquement le nom d'hote, par exemple
-`ep-nom-123456.us-east-2.aws.neon.tech` : sans `postgresql://`, sans
-identifiants, sans port, sans `/neondb`. Un hote contenant `-pooler`
-fonctionne parfois mais n'est pas recommande ici.
-
-`NEON_DATABASE` vaut `neondb` par defaut : il n'est necessaire que si la
-base porte un autre nom.
-
-**Etape 5 - Reconstruire l'APK**
-
-Les secrets sont integres a la compilation. Apres toute modification
-d'un secret, relancer le workflow (onglet Actions, "Build APK
-BanqueParle", "Run workflow", ou un nouveau push), puis reinstaller
-l'APK.
-
-### Si l'application annonce une erreur de base de donnees
-
-L'application dit maintenant la cause, et affiche en petit le texte
-technique ("Derniere erreur base") sous le titre.
-
-| Ce que dit l'application                     | Cause                                   | Solution |
-|----------------------------------------------|-----------------------------------------|----------|
-| base de donnees introuvable                  | Nom de base incorrect                   | Definir `NEON_DATABASE` (par defaut `neondb`), reconstruire |
-| script SQL non installe                      | `schema.sql` pas execute                | Etape 1 |
-| identifiants refuses                         | Role absent ou mot de passe different   | Etapes 1 et 2, puis secrets identiques, reconstruire |
-| droits insuffisants                          | Ancienne version du script              | Rejouer `schema.sql` |
-| adresse du serveur introuvable               | `NEON_HOST` faux, ou pas d'internet     | Hote seul, sans `postgresql://` |
-| serveur n'a pas identifie le projet          | Neon ne reconnait pas la connexion      | Utiliser l'hote direct ; si persistant, me communiquer l'erreur affichee |
-| impossible de joindre la banque              | Pas de connexion internet               | Verifier le reseau du telephone |
+**Étape 5 - Reconstruire l'APK.** Les secrets sont intégrés à la compilation :
+après toute modification, relancer le workflow, puis réinstaller l'APK.
 
 ### Tester un virement
 
-Un compte cree a l'enrolement demarre avec un solde de zero. Pour
-tester, crediter un compte depuis l'editeur SQL de Neon :
+Un compte neuf démarre à zéro. Pour tester, créditer un compte depuis
+l'éditeur SQL :
 
     UPDATE accounts SET balance = 50000 WHERE account_number = '123456';
 
-Enroler ensuite un second telephone (ou un second compte), puis dire
-"Banque Parlante" et "effectuer un virement".
+Enrôler ensuite un second compte, puis dire « Banque Parlante virement ».
 
-### Limites a connaitre
+### En cas d'erreur de base de données
 
-- Le numero de compte est declare par l'utilisateur a l'enrolement.
-  Un numero deja enregistre est refuse, mais rien ne prouve qu'un
-  numero libre appartient bien a la personne. Pour un deploiement
-  reel, la banque doit pre-creer les comptes et remettre un code
-  d'activation. Ce prototype ne le fait pas.
-- Si le reseau tombe exactement entre la creation du role cote Neon et
-  la reception du mot de passe par le telephone, le compte existe cote
-  base mais l'application ne peut plus s'y connecter. Il faut alors
-  supprimer la ligne correspondante dans `accounts` et le role
-  `cust_<numero>` depuis la console Neon, puis refaire l'enrolement.
-- Les virements exigent une connexion internet. Ils echouent
-  proprement, avec un message vocal, sans rien debiter, si le reseau
-  est absent.
+L'application dit la cause et affiche en petit « Dernière erreur base ».
 
----
+| Message de l'application                  | Cause                                | Solution |
+|-------------------------------------------|--------------------------------------|----------|
+| base de données introuvable               | Nom de base incorrect                | Définir `NEON_DATABASE` (défaut `neondb`), reconstruire |
+| script SQL non installé                   | `schema.sql` non exécuté             | Étape 1 |
+| identifiants refusés                      | Rôle absent ou mot de passe différent| Étapes 1 et 2, secrets identiques, reconstruire |
+| droits insuffisants                       | Ancienne version du script           | Rejouer `schema.sql` |
+| adresse du serveur introuvable            | `NEON_HOST` faux, ou pas d'internet  | Nom d'hôte seul |
+| impossible de joindre la banque           | Pas de connexion internet            | Vérifier le réseau |
 
-## 4. Configuration du depot GitHub (secrets)
+### Limites
 
-Les identifiants de la base ne doivent jamais etre dans le depot. Les
-ajouter dans GitHub : Settings > Secrets and variables > Actions >
-New repository secret.
-
-| Secret                      | Valeur                                      |
-|-----------------------------|---------------------------------------------|
-| NEON_HOST                   | Hote direct Neon (sans -pooler)             |
-| NEON_DATABASE               | Nom de la base (optionnel, defaut neondb)   |
-| NEON_PROVISIONER_USER       | `banqueparle_provisioner`                   |
-| NEON_PROVISIONER_PASSWORD   | Mot de passe defini a l'etape 3             |
-| ADVISOR_PHONE               | Numero du centre de relation client (touche 6), au format international, par exemple +22990000000. Accepte aussi comme variable (Settings > Secrets and variables > Actions > Variables) |
-
-Sans ces secrets, l'APK se construit quand meme, mais l'application
-annonce a l'oral que la base de donnees n'est pas configuree et les
-virements sont desactives. Un avertissement apparait dans le journal du
-workflow.
-
-Ne pas utiliser le mot de passe du role proprietaire de la base : le
-role de provisionnement a justement ete concu pour que l'APK ne
-contienne jamais un identifiant capable de lire les donnees.
+- Le numéro de compte est déclaré par l'utilisateur à l'enrôlement. Un
+  numéro déjà enregistré est refusé, mais rien ne prouve qu'un numéro libre
+  appartient à la personne. Pour un déploiement réel, la banque doit
+  pré-créer les comptes et remettre un code d'activation.
+- Si le réseau tombe entre la création du rôle côté Neon et la réception du
+  mot de passe par le téléphone, le compte existe côté base mais l'application
+  ne peut plus s'y connecter. Il faut supprimer la ligne dans `accounts` et le
+  rôle `cust_<numéro>`, puis refaire l'enrôlement.
+- Un virement dont la réponse se perd est annoncé comme échoué alors qu'il
+  peut avoir abouti. Avant de le refaire, vérifier l'historique (touche 2).
+- Les virements exigent internet.
 
 ---
 
-## 5. Fonctionnalites
+## 6. Secrets GitHub
 
-Detection du mot-cle : service d'arriere-plan permanent, ecoute en
-francais, tolerance aux homophones.
+Settings > Secrets and variables > Actions :
 
-Enrolement vocal, une question a la fois, avec confirmation orale des
-reponses sensibles et relance apres dix secondes de silence :
-- Identite : nom complet, date de naissance, numero de telephone.
-- Compte bancaire : numero de compte, type de compte.
-- Securite : empreinte digitale (jusqu'a trois enregistrements) puis
-  code secret a quatre chiffres obligatoire, stocke sous forme de
-  hachage SHA-256.
-- Activation du compte bancaire sur Neon.
+| Secret                      | Valeur                                                  |
+|-----------------------------|---------------------------------------------------------|
+| NEON_HOST                   | Nom d'hôte direct Neon (sans `-pooler`)                 |
+| NEON_DATABASE               | Nom de la base (facultatif, défaut `neondb`)            |
+| NEON_PROVISIONER_USER       | `banqueparle_provisioner`                               |
+| NEON_PROVISIONER_PASSWORD   | Mot de passe défini à l'étape 2                         |
+| ADVISOR_PHONE               | Numéro du centre de relation client, format international (secret ou variable) |
 
-Chaque reponse est enregistree immediatement : si l'enrolement est
-interrompu, redire le mot-cle reprend a la question suivante.
-
-### Les commandes (cahier des charges, section 3.1)
-
-Apres l'enrolement, chaque fonction est accessible de deux manieres :
-en disant "Banque Parlante" puis la demande (ou son numero), soit dans
-la meme phrase ("Banque Parlante solde", "Banque Parlante trois"), soit
-apres la question "Que souhaitez-vous faire ?", ou en appuyant sur la
-touche du pave numerique affiche a l'ecran. L'application annonce ce
-qu'elle a compris ("D'accord : consulter le solde") avant d'agir. Un appui
-sur une touche interrompt immediatement la voix, l'ecoute et l'invite
-d'empreinte en cours, puis lance la nouvelle commande.
-
-| Touche | Commande               | Mots reconnus (exemples)                  | Securite exigee          |
-|--------|------------------------|-------------------------------------------|--------------------------|
-| 1      | Consulter le solde     | solde, combien                            | Biometrie                |
-| 2      | Historique             | historique, operations, dernier virement  | Biometrie                |
-| 3      | Effectuer un virement  | virement, transfert, envoyer              | Biometrie forte          |
-| 4      | Code OTP               | code, OTP, code temporaire                | Biometrie                |
-| 5      | Gestion du profil      | profil, modifier, parametres              | Optionnelle              |
-| 6      | Contacter un conseiller| conseiller, appeler, contacter            | Aucune                   |
-| 0      | Arreter                | stop, arrete, zero, quitter, au revoir    | Confirmation "1 ou 2"    |
-
-Details de chaque fonction :
-
-1. Solde : identite verifiee, puis lecture du solde avec les centimes
-   lorsqu'il y en a.
-2. Historique : les trois dernieres operations, de la plus recente a la
-   plus ancienne, avec le sens (envoye ou recu), le montant, le nom du
-   correspondant, les quatre derniers chiffres de son compte et la date.
-   Le modele ne contient que des virements ; un prelevement est un debit
-   et apparait comme un virement envoye.
-3. Virement : numero du destinataire et montant dictes puis confirmes
-   oralement, empreinte ET code secret exiges, virement instantane,
-   annonce du nouveau solde. Les montants avec centimes sont compris
-   ("12,50", "12 euros 50").
-4. Code OTP : code de six chiffres genere par la base de donnees avec un
-   generateur cryptographique, valable cinq minutes, a usage unique,
-   dicte chiffre par chiffre et repetable. Cinq codes maximum par
-   periode de dix minutes. Le systeme destinataire verifie le code avec
-   la fonction `verify_otp` (voir sql/schema.sql).
-5. Profil : lecture du nom, de la date de naissance, du telephone, de la
-   fin du numero de compte, du type de compte, du nombre d'empreintes et
-   de l'etat du code secret. Modification possible du nom, du telephone,
-   de la date de naissance et du code secret. Changer le code secret
-   exige de donner l'ancien. Le nom est synchronise avec la base ; le
-   telephone et la date de naissance restent sur le telephone. Le numero
-   de compte n'est pas modifiable.
-6. Conseiller : appel direct du centre de relation client. Le numero est
-   fourni a la compilation (section 4). Si la permission d'appel a ete
-   accordee, l'appel part seul ; sinon le numero est pre-compose dans le
-   composeur.
-0. Arreter : voir "Arret d'urgence" ci-dessous.
-
-### Arret d'urgence
-
-A tout moment, "Banque Parlante arrete", "Banque Parlante stop", "stop",
-"arrete", "0" ou "zero" (ou la touche 0 de l'ecran) coupent l'activite
-en cours, puis l'application demande : "Vous etes sur de vouloir arreter
-Banque Parlante ? Dites 1 pour oui, ou 2 pour non."
-
-- Oui : l'application annonce "Banque Parlante est arrete" et se ferme
-  en arriere-plan. L'ecoute du mot-cle continue : dire "Banque
-  Parlante" la relance.
-- Non : "D'accord, on reprend", et l'activite repart depuis le debut de
-  son parcours (les champs deja enregistres a l'enrolement ne sont pas
-  redemandes).
-- Sans reponse claire apres trois essais : l'arret est execute. Il a
-  ete demande, et il peut s'agir d'une urgence.
-
-Precautions : "zero" est un chiffre legitime dans un code PIN ou un
-numero de compte. L'arret n'est donc declenche que si toute la reponse
-est une commande d'arret, avec un seul mot declencheur. Un code dicte
-"0 0 0 0" ne declenche rien. Dans la gestion du profil, "0 pour
-terminer" a ete remplace par "terminer", le 0 etant reserve a l'arret.
-
-Limite a connaitre : la commande vocale est entendue quand l'application
-ecoute, c'est-a-dire apres chaque question. Pendant qu'elle PARLE, le
-micro est ferme (sinon elle s'entendrait elle-meme et se declencherait
-seule). Pour couper immediatement une longue annonce, comme l'historique,
-utiliser la touche 0 de l'ecran : elle coupe la voix sur-le-champ.
-L'application ne conserve aucun etat authentifie : chaque operation
-sensible redemande l'identite, il n'y a donc pas de session a invalider.
-
-"Biometrie forte" n'est pas defini precisement par le cahier des
-charges. Il est interprete ici comme un double facteur : empreinte puis
-code secret, sans repli. Pour les fonctions a "Biometrie" simple, le
-code secret sert de repli si l'empreinte echoue ou si le telephone n'a
-pas de lecteur.
-
-Note d'ingenierie : l'adresse email n'est pas demandee par la voix. La
-dictee d'une adresse (arobase, points) est trop peu fiable pour un
-canal de securite.
-
-### Application lancee plusieurs fois
-
-Cause corrigee : l'activite principale utilisait un parametre
-(`taskAffinity` vide) qui pouvait creer une fenetre independante a
-chaque lancement. Elle est maintenant en `singleTask` : une seule
-instance existe, quel que soit le declencheur (icone, notification,
-mot-cle). En complement, un verrou empeche deux executions simultanees
-du meme flux vocal, et le service d'arriere-plan s'efface (micro et
-voix) pendant qu'un flux tourne au premier plan. Les valeurs partagees
-entre le service et l'interface (deux isolats Dart distincts) sont
-relues depuis le disque a chaque acces, pour qu'aucun des deux ne
-travaille sur une donnee perimee.
+Sans ces secrets, l'APK se construit quand même, mais les virements sont
+désactivés et l'application l'annonce à l'oral.
 
 ---
 
-## 6. Compatibilite et limites connues
+## 7. Sécurité
 
-- Android 6.0 (API 23) et superieur, soit la quasi-totalite des
-  telephones actuellement utilises.
-- La reconnaissance vocale s'appuie sur le service vocal du systeme.
-  Les telephones sans services Google (certains Huawei et Honor
-  recents, ROM alternatives) n'ont pas de moteur de reconnaissance
-  installe : le mot-cle ne peut pas y etre detecte. Installer le
-  service de reconnaissance vocale Google, avec la langue francaise
-  telechargee pour un usage hors ligne, resout le probleme sur tous
-  les appareils qui l'acceptent.
-- Reponses courtes ("1 pour oui, 2 pour non", choix du menu) : le moteur
-  vocal Android reconnait mal les mots isoles, en particulier les
-  chiffres. Mesures prises : modele de reconnaissance "confirmation"
-  (prevu pour les reponses breves) plutot que la dictee libre ;
-  conservation du meilleur texte capte au lieu d'ecraser par un resultat
-  vide ; plusieurs tentatives d'ecoute dans la fenetre de 10 secondes
-  avant de reposer la question ; acceptation des approximations
-  phonetiques ("de" pour deux, "hein" pour un) quand elles forment toute
-  la reponse. Une reponse non comprise ou ambigue est toujours
-  redemandee (jamais prise pour un "non"), avec la consigne "dites
-  simplement oui, ou non", les mots longs etant mieux reconnus.
-  Pour un virement, les approximations de "un" ne valent pas "oui" :
-  seuls "oui", "1" et "un" confirment, et l'absence de reponse claire
-  annule l'operation. L'ecran affiche "Derniere phrase entendue" : le
-  texte exact renvoye par le moteur vocal, utile pour diagnostiquer un
-  telephone donne.
-- Certains telephones emettent un court bip systeme a chaque
-  redemarrage de l'ecoute. C'est un comportement du moteur vocal
-  Android, non modifiable par l'application.
-- Aucune application tierce ne peut enroler un nouveau doigt dans le
-  capteur d'empreinte : cette operation est reservee aux reglages du
-  telephone. L'application authentifie avec les empreintes deja
-  enregistrees sur l'appareil. Si aucune n'est enregistree, elle passe
-  directement au code secret.
-- Le code secret a quatre chiffres n'a que dix mille combinaisons. Il
-  est stocke sous forme de hachage, mais une personne ayant acces aux
-  fichiers d'un telephone deverrouille (root) pourrait le retrouver.
-  C'est un facteur de repli, pas une protection contre ce scenario.
-- Un virement dont la reponse se perd (coupure reseau apres validation
-  par la base) est annonce comme echoue alors qu'il peut avoir abouti.
-  Avant de le refaire, consulter l'historique (touche 2) ou le solde
-  (touche 1).
-- Le code OTP est dicte a voix haute : il est audible par les personnes
-  proches. C'est inherent au fonctionnement vocal demande.
-- L'authentification biometrique n'est possible que sur un ecran
-  affiche : c'est pourquoi l'ouverture de l'application est requise
-  pour toute fonction protegee par l'empreinte (touches 1, 2, 3 et 4).
+- **Biométrie** : empreinte (3 essais) ; si le téléphone n'a pas de lecteur
+  ou si l'empreinte échoue, repli sur le code secret.
+- **Biométrie forte** (virement) : empreinte ET code secret, sans repli.
+  Le cahier des charges ne définit pas « forte » ; cette interprétation
+  (deux facteurs) est la plus défendable pour une opération qui déplace de
+  l'argent.
+- **Confirmation d'un virement** : seuls « oui », « 1 » et « un » valent
+  accord. Une réponse non comprise ou ambiguë est redemandée ; sans réponse
+  claire après trois essais, le virement est annulé.
+- L'application ne conserve aucun état authentifié : chaque opération
+  sensible redemande l'identité.
+- Aucune application tierce ne peut enrôler un nouveau doigt : cette
+  opération est réservée aux réglages du téléphone. L'application authentifie
+  avec les empreintes déjà enregistrées ; sinon, elle passe au code secret.
 
 ---
 
-## 7. Structure du depot
+## 8. Compatibilité et limites connues
+
+- Android 6.0 (API 23) et supérieur, téléphones ARM.
+- Mémoire : prévoir environ 300 Mo de RAM libres pour le moteur vocal. Sur un
+  téléphone très limité, le système peut arrêter le service d'écoute.
+- Le moteur de repli (Google) exige un service de reconnaissance vocale
+  installé. Les téléphones sans services Google n'en ont pas ; Vosk, lui,
+  fonctionne sans.
+- L'authentification biométrique n'est possible que sur un écran affiché :
+  l'ouverture de l'application est requise pour les touches 1 à 4.
+- Le code secret à quatre chiffres n'a que dix mille combinaisons. Il est
+  stocké haché, mais une personne ayant accès aux fichiers d'un téléphone
+  déverrouillé (root) pourrait le retrouver. C'est un facteur de repli.
+- Le code OTP est dicté à voix haute : il est audible par les personnes
+  proches. C'est inhérent au fonctionnement vocal demandé.
+- Certains téléphones émettent un court bip système lors de l'écoute avec le
+  moteur de repli. Vosk n'en émet pas.
+
+---
+
+## 9. Structure du dépôt
 
     .github/workflows/build-apk.yml       Construction et publication de l'APK
-    android_overrides/                    Fichiers Android appliques par la CI
-      main/AndroidManifest.xml
-      main/kotlin/MainActivity.kt
-      test/widget_test.dart
-    sql/schema.sql                        Schema et fonctions Neon
+    android_overrides/                    Fichiers Android appliqués par la CI
+    sql/schema.sql                        Schéma et fonctions Neon
+    assets/models/                        Modèle vocal (téléchargé par la CI)
     lib/
       main.dart
       screens/home_screen.dart
       services/
-        wake_word_service.dart            Mot-cle et conversation en arriere-plan
+        wake_word_service.dart            Mot-clé et conversation en arrière-plan
+        vosk_engine.dart                  Moteur hors ligne, repli, délégation
+        grammars.dart                     Vocabulaires restreints
+        stop_command.dart                 Arrêt d'urgence
         command_intent.dart               Reconnaissance des commandes
-        onboarding_fields.dart            Champs du formulaire
-        fingerprint_enrollment_flow.dart
-        pin_enrollment_flow.dart
-        pin_verification.dart
-        account_provisioning_service.dart Creation du role bancaire du client
-        transfer_service.dart             Acces Neon : virement, solde, historique, OTP
-        auth_gate.dart                    Biometrie simple ou forte
-        flow_control.dart                 Annulation d'une commande en cours
-        balance_flow.dart                 Touche 1
-        history_flow.dart                 Touche 2
-        transfer_flow.dart                Touche 3
-        otp_flow.dart                     Touche 4
-        profile_flow.dart                 Touche 5
-        advisor_flow.dart                 Touche 6
         voice_dialog.dart, stt_helper.dart, tts_service.dart
-      utils/
-        app_colors.dart, onboarding_storage.dart, text_normalize.dart,
-        digit_parser.dart, amount_parser.dart, native_channel.dart,
-        permissions_helper.dart
+        auth_gate.dart                    Biométrie simple ou forte
+        balance_flow.dart ... advisor_flow.dart   Touches 1 à 6
+        transfer_service.dart             Accès Neon
+      utils/                              Couleurs, stockage, analyse de montants...
 
-Les dossiers `android/`, `ios/` et `build/` ne sont pas versionnes : la
-CI les regenere a chaque build puis applique `android_overrides/`.
+Les dossiers `android/`, `ios/` et `build/` ne sont pas versionnés : la CI les
+régénère à chaque build puis applique `android_overrides/`.
 
 ---
 
-## 8. Charte graphique
+## 10. Charte graphique
 
 Deux couleurs uniquement, sans exception :
 
-| Usage          | Couleur | Code      |
-|----------------|---------|-----------|
-| Accent, texte  | Bleu    | `#1A73E8` |
-| Fond           | Blanc   | `#FFFFFF` |
+| Usage         | Couleur | Code      |
+|---------------|---------|-----------|
+| Accent, texte | Bleu    | `#1A73E8` |
+| Fond          | Blanc   | `#FFFFFF` |
