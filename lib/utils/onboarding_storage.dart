@@ -232,6 +232,22 @@ class OnboardingStorage {
     return p.getString(_kVoiceStatus) ?? '';
   }
 
+  /// Acces generique, utilise par le disjoncteur du moteur vocal.
+  static Future<String?> getString(String key) async {
+    final p = await _prefs();
+    return p.getString(key);
+  }
+
+  static Future<void> setString(String key, String value) async {
+    final p = await _prefs();
+    await p.setString(key, value);
+  }
+
+  static Future<void> remove(String key) async {
+    final p = await _prefs();
+    await p.remove(key);
+  }
+
   static Future<void> resetAll() async {
     final p = await _prefs();
     final keys = p.getKeys().where((k) =>

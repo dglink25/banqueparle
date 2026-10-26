@@ -245,6 +245,21 @@ précieux pour diagnostiquer un téléphone donné.
   réduction de code R8) et cible les téléphones ARM, ce qui évite de
   multiplier la taille de l'APK par les bibliothèques x86.
 
+### Disjoncteur anti-plantage
+
+Un plantage natif (mémoire, bibliothèque, micro) ne peut pas être intercepté
+par le code de l'application. Pour éviter qu'il se répète à chaque ouverture,
+l'application note chaque étape risquée de Vosk (extraction du modèle,
+chargement, ouverture du micro) et l'efface une fois terminée. Si le
+téléphone a arrêté l'application pendant une étape, la version suivante
+désactive Vosk, retombe sur Google et affiche à l'écran : « Vosk désactivé :
+le téléphone a arrêté l'application pendant « étape » ». Cette information
+sert à corriger le problème. Une nouvelle version de l'application retente
+Vosk une fois.
+
+Le modèle est extrait en flux (faible consommation de mémoire), quelques
+secondes après l'affichage de l'écran.
+
 ### Reconnaissance des noms
 
 Un nom comme « Houndokinnou Diègue » n'existe dans aucun dictionnaire : le

@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
+import 'package:archive/archive_io.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:vosk_flutter_service/vosk_flutter_service.dart';
 
 import '../utils/onboarding_storage.dart';
+import 'vosk_guard.dart';
 
 /// -----------------------------------------------------------------------
 /// Reconnaissance vocale hors ligne (Vosk) a vocabulaire restreint.
@@ -70,20 +75,65 @@ class VoskEngine {
   // Cote ecran : extraction du modele depuis les assets (une seule fois)
   // ---------------------------------------------------------------------
 
+  static bool _isModelDir(Directory d) =>
+      File('${d.path}/am/final.mdl').existsSync();
+
+  static String? _findModelDir(Directory root) {
+    if (_isModelDir(root)) return root.path;
+    for (final entry in root.listSync()) {
+      if (entry is Directory && _isModelDir(entry)) return entry.path;
+    }
+    return null;
+  }
+
   /// Extrait le modele dans le stockage de l'application et memorise son
-  /// chemin. Appele par l'ecran au demarrage, sans bloquer l'interface :
-  /// la premiere extraction prend quelques dizaines de secondes.
+  /// chemin. Appele par l'ecran peu apres son affichage, sans le bloquer.
+  ///
+  /// Extraction sobre en memoire : le zip (41 Mo) est copie dans un fichier,
+  /// puis decompresse EN FLUX dans un autre processus (isolat). La
+  /// decompression d'un coup en memoire (ModelLoader du plugin) pouvait faire
+  /// depasser la memoire d'un telephone modeste, et l'extraction reprenant a
+  /// chaque ouverture, l'application se fermait en boucle.
   static Future<void> prepareModelFromAssets() async {
     try {
+      if (await VoskGuard.isDisabled()) return;
+
       final known = await OnboardingStorage.getVoskModelPath();
-      if (known != null && Directory(known).existsSync()) return;
+      if (known != null && _isModelDir(Directory(known))) return;
+
+      await VoskGuard.begin(VoskGuard.slotUi, 'extraction du modèle vocal');
       await OnboardingStorage.setVoiceStatus(
-        'Préparation du modèle vocal (première ouverture)...',
+        'Préparation du modèle vocal (première ouverture, environ 30 s)...',
       );
-      final path = await ModelLoader().loadFromAssets(modelAsset);
-      await OnboardingStorage.setVoskModelPath(path);
+
+      final support = await getApplicationSupportDirectory();
+      final root = Directory('${support.path}/vosk');
+      if (root.existsSync()) await root.delete(recursive: true);
+      await root.create(recursive: true);
+
+      final zipFile = File('${root.path}/model.zip');
+      final data = await rootBundle.load(modelAsset);
+      await zipFile.writeAsBytes(
+        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+        flush: true,
+      );
+
+      final zipPath = zipFile.path;
+      final outPath = root.path;
+      await Isolate.run(() async {
+        await extractFileToDisk(zipPath, outPath);
+      });
+      await zipFile.delete();
+
+      final modelPath = _findModelDir(root);
+      if (modelPath == null) {
+        throw Exception('modèle incomplet après extraction');
+      }
+      await OnboardingStorage.setVoskModelPath(modelPath);
+      await VoskGuard.end(VoskGuard.slotUi);
       await OnboardingStorage.setVoiceStatus('Modèle vocal prêt.');
     } catch (e) {
+      await VoskGuard.end(VoskGuard.slotUi);
       await OnboardingStorage.setVoiceStatus(
         'Modèle vocal indisponible : ${_short(e)}',
       );
@@ -107,8 +157,9 @@ class VoskEngine {
     }
     _lastLoadAttempt = DateTime.now();
     try {
+      if (await VoskGuard.isDisabled()) return false;
       final path = await OnboardingStorage.getVoskModelPath();
-      if (path == null || !Directory(path).existsSync()) {
+      if (path == null || !_isModelDir(Directory(path))) {
         await OnboardingStorage.setVoiceStatus(
           'En attente du modèle vocal : ouvrez l\'application une fois. '
           'Moteur de repli : Google.',
@@ -116,7 +167,12 @@ class VoskEngine {
         return false;
       }
       _vosk ??= VoskFlutterPlugin.instance();
-      _model = await _vosk!.createModel(path);
+      await VoskGuard.begin(VoskGuard.slotService, 'chargement du modèle vocal');
+      try {
+        _model = await _vosk!.createModel(path);
+      } finally {
+        await VoskGuard.end(VoskGuard.slotService);
+      }
       await OnboardingStorage.setVoiceStatus(
         'Moteur vocal : Vosk hors ligne actif.',
       );
@@ -178,19 +234,25 @@ class VoskEngine {
     void Function(String raw) onPartial,
   ) async {
     final vosk = _vosk!;
-    final recognizer = await vosk.createRecognizer(
-      model: _model!,
-      sampleRate: _sampleRate,
-      grammar: grammar,
-    );
-    final service = await vosk.initSpeechService(recognizer);
-    _recognizer = recognizer;
-    _service = service;
-    _subResult =
-        service.onResult().listen((j) => onFinal(_extract(j, 'text')));
-    _subPartial =
-        service.onPartial().listen((j) => onPartial(_extract(j, 'partial')));
-    await service.start();
+    await VoskGuard.begin(VoskGuard.slotService, 'ouverture du micro');
+    try {
+      final recognizer = await vosk.createRecognizer(
+        model: _model!,
+        sampleRate: _sampleRate,
+        grammar: grammar,
+      );
+      final service = await vosk.initSpeechService(recognizer);
+      _recognizer = recognizer;
+      _service = service;
+      _subResult =
+          service.onResult().listen((j) => onFinal(_extract(j, 'text')));
+      _subPartial = service
+          .onPartial()
+          .listen((j) => onPartial(_extract(j, 'partial')));
+      await service.start();
+    } finally {
+      await VoskGuard.end(VoskGuard.slotService);
+    }
   }
 
   static Future<void> _end() async {

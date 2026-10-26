@@ -4,12 +4,18 @@ import 'package:flutter/material.dart';
 import 'services/wake_word_service.dart';
 import 'services/tts_service.dart';
 import 'services/vosk_engine.dart';
+import 'services/vosk_guard.dart';
 import 'utils/app_colors.dart';
 import 'utils/permissions_helper.dart';
 import 'screens/home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 0. Disjoncteur du moteur vocal : si le telephone a arrete l'application
+  //    pendant une etape de Vosk lors de la session precedente, Vosk est
+  //    desactive (repli sur Google) au lieu de replanter a chaque ouverture.
+  await VoskGuard.inspect();
 
   // 1. Demande des permissions nécessaires (micro, notifications, batterie).
   await PermissionsHelper.requestAll();
@@ -22,9 +28,14 @@ Future<void> main() async {
   await initializeWakeWordService();
 
   // Extrait le modele de reconnaissance hors ligne (premiere ouverture :
-  // quelques dizaines de secondes). Sans bloquer l'affichage ; le service
-  // d'arriere-plan le charge des qu'il est pret.
-  unawaited(VoskEngine.prepareModelFromAssets());
+  // une trentaine de secondes). Differe de quelques secondes pour que
+  // l'ecran et les demandes d'autorisation soient deja affiches, et sans
+  // bloquer l'interface ; le service d'arriere-plan le charge des qu'il
+  // est pret.
+  unawaited(Future.delayed(
+    const Duration(seconds: 5),
+    VoskEngine.prepareModelFromAssets,
+  ));
 
   runApp(const BanqueParleApp());
 }

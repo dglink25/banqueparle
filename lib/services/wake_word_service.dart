@@ -17,6 +17,7 @@ import 'stop_command.dart';
 import 'stt_helper.dart';
 import 'voice_dialog.dart';
 import 'vosk_engine.dart';
+import 'vosk_guard.dart';
 
 /// -----------------------------------------------------------------------
 /// WakeWordService
@@ -183,6 +184,7 @@ void onServiceStart(ServiceInstance service) async {
   // (un seul modele en memoire, un seul acces au micro). L'ecran lui
   // delegue ses ecoutes par messages.
   VoskEngine.isOwner = true;
+  await VoskGuard.inspect();
   unawaited(VoskEngine.ensureReady());
 
   final cancelledRemote = <String>{};
