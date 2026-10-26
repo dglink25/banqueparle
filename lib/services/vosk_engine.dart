@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:vosk_flutter/vosk_flutter.dart';
+import 'package:vosk_flutter_service/vosk_flutter_service.dart';
 
 import '../utils/onboarding_storage.dart';
 
