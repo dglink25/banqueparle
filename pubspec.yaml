@@ -33,7 +33,7 @@ dependencies:
   flutter_local_notifications: ^18.0.1
 
   # --- Gestion des permissions (micro, notifications, ignorer l'optimisation batterie) ---
-  permission_handler: '>=11.3.1 <14.0.0'
+  permission_handler: ^12.0.1
 
   # --- Reconnaissance vocale hors ligne (mot-cle, oui/non, menu) ---
   # Moteur Vosk avec vocabulaire restreint : tolere bien mieux les accents
@@ -58,3 +58,13 @@ flutter:
   assets:
     - assets/
     - assets/models/
+
+# Le fork Vosk declare permission_handler ^13, dont la partie Android exige
+# le SDK Android 37. Or le projet est compile contre le SDK 36 (maximum
+# recommande par la version actuelle de l'outil de build) : la compilation
+# echouait sur "requires compile against version 37 or later". La version 12
+# offre les memes fonctions (micro, notifications, telephone, batterie) avec
+# une partie Android compatible SDK 36. Le plugin Vosk ne s'en sert que pour
+# verifier l'autorisation du micro.
+dependency_overrides:
+  permission_handler: 12.0.1
