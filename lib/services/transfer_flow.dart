@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import '../utils/amount_parser.dart';
 import '../utils/digit_parser.dart';
 import 'auth_gate.dart';
+import 'local_cache.dart';
+import 'sync_service.dart';
 import 'transfer_service.dart';
 import 'voice_dialog.dart';
 
@@ -59,6 +63,11 @@ class TransferFlow {
     );
 
     if (result.success) {
+      // Copie locale a jour tout de suite : solde, puis historique.
+      if (result.newBalance != null) {
+        await LocalCache.saveBalance(result.newBalance!);
+      }
+      unawaited(SyncService.syncAll());
       final balanceText = result.newBalance != null
           ? ' Votre nouveau solde est de ${speakAmount(result.newBalance!)}.'
           : '';

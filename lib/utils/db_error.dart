@@ -11,7 +11,13 @@
 class DbErrorInfo {
   final String spoken;
   final String detail;
-  const DbErrorInfo(this.spoken, this.detail);
+
+  /// Vrai si la cause est l'absence de connexion internet (et non une
+  /// erreur de configuration ou de base). Permet de repondre depuis les
+  /// donnees synchronisees sur le telephone, avec le message adapte.
+  final bool network;
+
+  const DbErrorInfo(this.spoken, this.detail, {this.network = false});
 }
 
 DbErrorInfo describeDbError(Object error) {
@@ -61,6 +67,7 @@ DbErrorInfo describeDbError(Object error) {
       'L\'adresse du serveur est introuvable. Vérifiez que le téléphone a '
       'internet et que l\'hôte de la base est correct.',
       detail,
+      network: true,
     );
   }
   if (low.contains('socketexception') ||
@@ -73,6 +80,7 @@ DbErrorInfo describeDbError(Object error) {
       'Impossible de joindre la banque. Vérifiez votre connexion '
       'internet et réessayez.',
       detail,
+      network: true,
     );
   }
   return DbErrorInfo(

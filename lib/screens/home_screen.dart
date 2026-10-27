@@ -16,7 +16,9 @@ import '../services/onboarding_fields.dart';
 import '../services/otp_flow.dart';
 import '../services/pin_enrollment_flow.dart';
 import '../services/profile_flow.dart';
+import '../services/local_cache.dart';
 import '../services/stop_command.dart';
+import '../services/sync_service.dart';
 import '../services/stt_helper.dart';
 import '../services/transfer_flow.dart';
 import '../services/tts_service.dart';
@@ -218,6 +220,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await say(result.message);
     if (result.success) {
       await OnboardingStorage.setAccountProvisioned(true);
+      // Envoie le profil saisi a l'enrolement (telephone, date de
+      // naissance, type de compte) puis fait une premiere synchronisation.
+      final sent = await SyncService.pushLocalProfile();
+      if (!sent) await LocalCache.setProfileDirty(true);
+      unawaited(SyncService.syncAll());
     }
     return result.success;
   }
@@ -609,30 +616,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppColors.blue, fontSize: 15),
               ),
-              if (_lastHeard.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Dernière phrase entendue : "$_lastHeard"',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.blue, fontSize: 12),
-                ),
-              ],
-              if (_voiceStatus.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  _voiceStatus,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.blue, fontSize: 12),
-                ),
-              ],
-              if (_lastDbError.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Dernière erreur base : $_lastDbError',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: AppColors.blue, fontSize: 12),
-                ),
-              ],
               const SizedBox(height: 16),
               _MicIndicator(active: busy),
               const SizedBox(height: 16),
@@ -651,6 +634,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     style: TextStyle(color: AppColors.blue, fontSize: 13),
                   ),
                 ),
+              _DiagnosticBox(
+                lines: [
+                  if (_voiceStatus.isNotEmpty) _voiceStatus,
+                  if (_lastHeard.isNotEmpty) 'Entendu : $_lastHeard',
+                  if (_lastDbError.isNotEmpty) 'Base : $_lastDbError',
+                ],
+              ),
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -803,6 +793,51 @@ class _KeyButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Bloc de diagnostic unique et discret : etat du moteur vocal, derniere
+/// phrase entendue, derniere erreur de base. Il n'apparait que s'il y a
+/// quelque chose a dire. Reserve au reglage ; l'application se pilote
+/// entierement a la voix.
+class _DiagnosticBox extends StatelessWidget {
+  final List<String> lines;
+  const _DiagnosticBox({required this.lines});
+
+  @override
+  Widget build(BuildContext context) {
+    if (lines.isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        border: Border.all(color: AppColors.blueFaint(0.4), width: 1),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Diagnostic',
+            style: TextStyle(
+              color: AppColors.blueFaint(0.7),
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          for (final line in lines)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                line,
+                style: const TextStyle(color: AppColors.blue, fontSize: 11),
+              ),
+            ),
+        ],
       ),
     );
   }

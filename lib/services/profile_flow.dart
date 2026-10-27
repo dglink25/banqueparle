@@ -1,9 +1,11 @@
 import '../utils/onboarding_storage.dart';
 import '../utils/text_normalize.dart';
 import 'grammars.dart';
+import 'local_cache.dart';
 import 'onboarding_fields.dart';
 import 'pin_enrollment_flow.dart';
 import 'pin_verification.dart';
+import 'sync_service.dart';
 import 'transfer_service.dart';
 import 'voice_dialog.dart';
 
@@ -49,6 +51,7 @@ class ProfileFlow {
         maxRetries: 1,
         shortAnswer: true,
         grammar: kProfileGrammar,
+        grammarAttempts: 1,
       );
       if (choice == null) return;
 
@@ -78,12 +81,37 @@ class ProfileFlow {
     }
     if (has(['1', 'un', 'une'])) return 'full_name';
     if (has(['2', 'deux'])) return 'phone_number';
+    if (words.length == 1) {
+      // Approximations d'un chiffre dit seul.
+      if (has(['hein', 'in', 'ain', 'en'])) return 'full_name';
+      if (has(['de', 'des', 'deu', 'deus', 'dos'])) return 'phone_number';
+    }
     if (has(['3', 'trois'])) return 'birth_date';
     if (has(['4', 'quatre'])) return 'pin';
     return null;
   }
 
   Future<void> _readProfile() async {
+    // Profil EN LIGNE d'abord. Hors connexion, on le dit et on lit la copie
+    // du telephone. Une modification locale non envoyee n'est jamais ecrasee.
+    if (!await LocalCache.isProfileDirty()) {
+      final remote = await TransferService.getProfile();
+      if (remote.ok) {
+        await SyncService.mergeProfile(remote.value!);
+      } else if (remote.offline) {
+        await LocalCache.setNeedsSync(true);
+        await speak(
+          'La connexion internet n\'est pas accessible. Voici le profil '
+          'enregistré sur ce téléphone.',
+        );
+      }
+    } else {
+      await speak(
+        'Voici le profil enregistré sur ce téléphone, avec une modification '
+        'pas encore synchronisée.',
+      );
+    }
+
     final name = await OnboardingStorage.getField('full_name') ?? 'non renseigné';
     final birth =
         await OnboardingStorage.getField('birth_date') ?? 'non renseignée';
@@ -145,17 +173,19 @@ class ProfileFlow {
     }
     await OnboardingStorage.setField(target, value);
 
-    if (target == 'full_name') {
-      final synced = await TransferService.updateOwnerName(value);
-      await speak(
-        synced
-            ? 'Votre nom a été mis à jour.'
-            : 'Votre nom a été mis à jour sur ce téléphone, mais n\'a pas '
-                'pu être synchronisé avec la banque. Vérifiez votre '
-                'connexion internet.',
-      );
+    // Envoi vers la base. Sans connexion, la modification reste sur le
+    // telephone et partira des que la connexion reviendra.
+    final sent = await SyncService.pushLocalProfile();
+    if (sent) {
+      await LocalCache.setProfileDirty(false);
+      await speak('Information mise à jour et synchronisée.');
     } else {
-      await speak('Information mise à jour.');
+      await LocalCache.setProfileDirty(true);
+      await LocalCache.setNeedsSync(true);
+      await speak(
+        'Information enregistrée sur le téléphone. Elle sera synchronisée '
+        'dès que la connexion reviendra.',
+      );
     }
   }
 }

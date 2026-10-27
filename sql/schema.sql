@@ -389,3 +389,68 @@ $$;
 
 REVOKE ALL ON FUNCTION update_owner_name FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION update_owner_name TO customer_base;
+
+-- -----------------------------------------------------------------------
+-- Profil complet dans la base.
+--
+-- Le nom est deja stocke (accounts.owner_name). Le telephone, la date de
+-- naissance et le type de compte etaient uniquement sur le telephone ; ils
+-- sont maintenant dans la base pour etre lus en ligne et synchronises. Les
+-- anciens comptes ont ces colonnes vides : l'application les renseigne a
+-- sa premiere synchronisation.
+-- -----------------------------------------------------------------------
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS phone_number text;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS birth_date text;
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS account_type text;
+
+CREATE OR REPLACE FUNCTION get_profile()
+RETURNS TABLE (
+  p_account_number text,
+  p_owner_name text,
+  p_phone_number text,
+  p_birth_date text,
+  p_account_type text
+)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT account_number, owner_name, phone_number, birth_date, account_type
+  FROM accounts
+  WHERE pg_role_name = session_user;
+$$;
+
+REVOKE ALL ON FUNCTION get_profile FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_profile TO customer_base;
+
+CREATE OR REPLACE FUNCTION update_profile(
+  p_phone text,
+  p_birth text,
+  p_type text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF length(coalesce(p_phone, '')) > 40
+     OR length(coalesce(p_birth, '')) > 60
+     OR length(coalesce(p_type, '')) > 60 THEN
+    RAISE EXCEPTION 'INVALID_PROFILE';
+  END IF;
+
+  UPDATE accounts
+  SET phone_number = nullif(trim(p_phone), ''),
+      birth_date = nullif(trim(p_birth), ''),
+      account_type = nullif(trim(p_type), '')
+  WHERE pg_role_name = session_user;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'CALLER_ACCOUNT_NOT_FOUND';
+  END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION update_profile FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION update_profile TO customer_base;

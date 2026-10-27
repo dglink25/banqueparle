@@ -170,6 +170,39 @@ cours, puis lance la nouvelle commande.
    à la compilation, section 6). Si la permission d'appel est accordée,
    l'appel part seul ; sinon le numéro est prénuméroté dans le composeur.
 
+### Voix seule
+
+Aucune opération ne demande de toucher l'écran : solde, historique,
+virement, code, profil, conseiller et arrêt se font à la voix. Les touches de
+l'écran ne sont qu'un secours. Les seules actions hors de la voix sont la
+configuration unique de la section 2 (avec l'aide d'une personne voyante) et
+le doigt posé sur le capteur d'empreinte.
+
+### Données en ligne et synchronisation
+
+La base en ligne est la référence. Solde, historique et profil sont lus **en
+direct dans la base** à chaque demande. L'application annonce « Solde en
+ligne : … » avec les quatre derniers chiffres du compte, pour vérifier que
+c'est le bon compte.
+
+Sans connexion internet, l'application le dit clairement (« La connexion
+internet n'est pas accessible ») puis donne la **dernière copie synchronisée
+sur le téléphone**, avec sa date et son heure. Elle n'invente jamais une
+valeur : sans connexion ni copie, elle le dit. Le profil modifié hors
+connexion est enregistré sur le téléphone et envoyé dès que la connexion
+revient. Seul le virement exige internet.
+
+La copie locale est mise à jour : à chaque lecture réussie, après chaque
+virement, au démarrage, toutes les 20 minutes, et dans les 2 minutes qui
+suivent un échec dû à l'absence de connexion.
+
+Ce n'est pas une synchronisation « poussée » en continu. Une interrogation
+permanente maintiendrait la base Neon éveillée (elle se met en veille après
+quelques minutes) et épuiserait le quota de calcul du plan gratuit ainsi que
+la batterie. Conséquence : un virement reçu apparaît immédiatement dans la
+base, et vous le lisez en direct dès que vous demandez le solde ; la copie
+locale, elle, peut avoir jusqu'à 20 minutes de retard hors connexion.
+
 ### Arrêt d'urgence
 
 À tout moment, « Banque Parlante arrête », « Banque Parlante stop », « stop »,
@@ -260,6 +293,18 @@ Vosk une fois.
 Le modèle est extrait en flux (faible consommation de mémoire), quelques
 secondes après l'affichage de l'écran.
 
+### Chiffres courts (« un », « deux »)
+
+Constat : « quatre » (quatre sons) était compris, mais pas « un » (un son) ni
+« deux » (deux sons). Dans Vosk, le candidat « ce n'est aucun de ces mots »
+gagne souvent contre un mot aussi bref. Mesures : « un » et « deux » sont
+répétés dans la grammaire pour leur donner plus de poids ; les mots proches
+qu'un accent produit (« une », « hein », « de », « des ») sont proposés au
+moteur puis ramenés au bon chiffre, uniquement quand ils forment toute la
+réponse ; et si le moteur hors ligne échoue deux fois sur une question, la
+tentative suivante utilise le moteur Google au lieu de reposer la même
+question au même moteur.
+
 ### Reconnaissance des noms
 
 Un nom comme « Houndokinnou Diègue » n'existe dans aucun dictionnaire : le
@@ -287,8 +332,8 @@ forme de fonctions `SECURITY DEFINER` :
   un mot de passe aléatoire conservé uniquement dans le stockage chiffré du
   téléphone.
 - Ce rôle n'a aucun droit direct sur les tables : il ne peut qu'exécuter
-  `transfer_funds()`, `get_balance()`, `get_history()`, `generate_otp()` et
-  `update_owner_name()`.
+  `transfer_funds()`, `get_balance()`, `get_history()`, `get_profile()`,
+  `update_profile()`, `generate_otp()` et `update_owner_name()`.
 - Ces fonctions déterminent elles-mêmes le compte émetteur à partir du rôle
   connecté (`session_user`) : un rôle compromis ne peut déplacer que l'argent
   de son propre compte.
@@ -315,6 +360,9 @@ après une mise à jour du fichier. Il faut le rejouer si une ancienne
 version a été exécutée : elle contenait un défaut (`current_user` au lieu de
 `session_user`) qui faisait échouer tout virement et toute lecture de solde.
 
+Le script contient aussi le profil complet (téléphone, date de naissance,
+type de compte) : il doit être rejoué en entier après cette mise à jour.
+
 **Étape 2 - Définir le mot de passe du rôle de provisionnement**, dans le
 même éditeur (mot de passe long, aléatoire, sans apostrophe) :
 
@@ -327,9 +375,10 @@ même éditeur (mot de passe long, aléatoire, sans apostrophe) :
 
     SELECT proname FROM pg_proc
     WHERE proname IN ('create_customer_role', 'transfer_funds', 'get_balance',
-                      'get_history', 'generate_otp', 'verify_otp', 'update_owner_name');
+                      'get_history', 'generate_otp', 'verify_otp', 'update_owner_name',
+                      'get_profile', 'update_profile');
 
-La première requête doit renvoyer 3 lignes, la seconde 7.
+La première requête doit renvoyer 3 lignes, la seconde 9.
 
 **Étape 4 - Renseigner les secrets GitHub** (section 6). Le rôle à mettre dans
 `NEON_PROVISIONER_USER` est `banqueparle_provisioner`. Ne jamais y mettre
@@ -346,14 +395,25 @@ d'hôte, par exemple `ep-nom-123456.us-east-2.aws.neon.tech`, sans
 **Étape 5 - Reconstruire l'APK.** Les secrets sont intégrés à la compilation :
 après toute modification, relancer le workflow, puis réinstaller l'APK.
 
-### Tester un virement
+### Vérifier un compte et le créditer pour tester
 
-Un compte neuf démarre à zéro. Pour tester, créditer un compte depuis
-l'éditeur SQL :
+Un compte neuf démarre à zéro : « Solde en ligne : zéro » est alors une
+réponse **réelle** de la base, pas une erreur. Le numéro de compte enregistré
+provient de la reconnaissance vocale : il peut différer du numéro que vous
+croyez avoir dit. Avant de créditer, listez les comptes pour lire le numéro
+exact :
 
-    UPDATE accounts SET balance = 50000 WHERE account_number = '123456';
+    SELECT account_number, owner_name, balance, phone_number
+    FROM accounts ORDER BY created_at DESC;
 
-Enrôler ensuite un second compte, puis dire « Banque Parlante virement ».
+Puis créditez en recopiant le numéro **tel qu'affiché** :
+
+    UPDATE accounts SET balance = 50000 WHERE account_number = '<numéro affiché>';
+
+La requête doit répondre `UPDATE 1`. Si elle répond `UPDATE 0`, le numéro ne
+correspond à aucun compte. Demandez ensuite le solde : l'application annonce
+les quatre derniers chiffres du compte lu. Pour tester un virement, enrôler un
+second compte, puis dire « Banque Parlante virement ».
 
 ### En cas d'erreur de base de données
 

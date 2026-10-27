@@ -121,6 +121,13 @@ const _digitWords = {
   '6': '6', 'six': '6',
 };
 
+/// Mots qu'un accent produit a la place de "un" et "deux" quand le chiffre
+/// est dit seul. Ils figurent aussi dans les grammaires (grammars.dart).
+const _aloneDigit = {
+  'hein': '1', 'in': '1', 'ain': '1', 'en': '1',
+  'de': '2', 'des': '2', 'deu': '2', 'deus': '2', 'dos': '2',
+};
+
 /// Determine l'intention a partir de la phrase reconnue. Comparaison mot
 /// a mot (et non par sous-chaine) pour eviter les faux positifs.
 ///
@@ -143,6 +150,13 @@ BankIntent detectIntent(String recognized) {
 
   for (final w in list) {
     final key = _digitWords[w];
+    if (key != null) return intentForKey(key);
+  }
+
+  // Approximations d'un chiffre dit seul ("hein" pour un, "de" pour deux) :
+  // acceptees uniquement quand elles constituent toute la reponse.
+  if (list.length == 1) {
+    final key = _aloneDigit[list.first];
     if (key != null) return intentForKey(key);
   }
   return BankIntent.none;

@@ -44,6 +44,7 @@ double? parseAmount(String raw) {
 /// Montant pret a etre lu par la synthese vocale, avec precision :
 /// 1250 -> "1250" ; 1250.5 -> "1250 virgule 50".
 String speakAmount(double value) {
+  if (value == 0) return 'zéro';
   final fixed = value.toStringAsFixed(2);
   final parts = fixed.split('.');
   if (parts[1] == '00') return parts[0];

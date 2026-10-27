@@ -40,6 +40,7 @@ Future<String?> askWithRetry({
   int maxRetries = 5,
   bool shortAnswer = false,
   List<String>? grammar,
+  int grammarAttempts = 1000,
   String? retryQuestion,
 }) async {
   for (var attempt = 0; attempt <= maxRetries; attempt++) {
@@ -51,7 +52,7 @@ Future<String?> askWithRetry({
       await speak('Je n\'ai pas bien entendu. ${retryQuestion ?? question}');
     }
     ListenHint.shortAnswer = shortAnswer;
-    ListenHint.grammar = grammar;
+    ListenHint.grammar = attempt < grammarAttempts ? grammar : null;
     String? answer;
     try {
       answer = await listen();
@@ -103,7 +104,7 @@ bool? parseYesNo(String raw, {bool strictYes = false}) {
   };
   // Approximations frequentes d'un chiffre dit seul.
   const yesAloneWords = {'hein', 'in', 'ain', 'en', 'han', 'um'};
-  const noAloneWords = {'de', 'deu', 'deus', 'dos', 'dd'};
+  const noAloneWords = {'de', 'des', 'deu', 'deus', 'dos', 'dd'};
 
   var yes = false;
   var no = false;
@@ -150,6 +151,7 @@ Future<bool?> askYesNo({
   String simpleHint = 'Dites simplement oui, ou non.',
   int maxAttempts = 4,
   bool strictYes = false,
+  int googleFromAttempt = 2,
 }) async {
   var heardSomethingUnclear = false;
   for (var attempt = 0; attempt < maxAttempts; attempt++) {
@@ -164,7 +166,10 @@ Future<bool?> askYesNo({
     await speak(prompt);
 
     ListenHint.shortAnswer = true; // reponse breve attendue
-    ListenHint.grammar = kYesNoGrammar;
+    // Les deux premieres tentatives utilisent le moteur hors ligne
+    // (vocabulaire restreint). Si elles echouent, la suivante essaie le
+    // moteur Google plutot que de reposer la meme question au meme moteur.
+    ListenHint.grammar = attempt >= googleFromAttempt ? null : kYesNoGrammar;
     String? answer;
     try {
       answer = await listen();

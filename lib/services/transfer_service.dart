@@ -95,24 +95,31 @@ class TransferService {
     }
   }
 
-  static Future<double?> getBalance() async {
+  /// Lit le solde EN LIGNE, dans la base. Ne renvoie jamais une valeur
+  /// inventee : en cas d'echec, [Fetched.offline] distingue l'absence de
+  /// connexion d'une autre erreur, pour que l'appelant puisse repondre
+  /// depuis les donnees synchronisees avec un message clair.
+  static Future<Fetched<double>> getBalance() async {
     try {
-      return await _withConnection<double>((conn) async {
+      final value = await _withConnection<double>((conn) async {
         final result = await conn
             .execute('SELECT get_balance()::double precision AS b');
         return (result.first.toColumnMap()['b'] as num).toDouble();
       });
+      if (value == null) return Fetched.notActivated();
+      return Fetched.ok(value);
     } catch (e) {
       await _record(e);
-      return null;
+      final info = describeDbError(e);
+      return Fetched.failure(info.spoken, offline: info.network);
     }
   }
 
   /// Dernieres operations (envoyees ou recues), de la plus recente a la
-  /// plus ancienne. Renvoie null en cas d'erreur (reseau, compte inactif).
-  static Future<List<HistoryEntry>?> getHistory({int limit = 3}) async {
+  /// plus ancienne, lues en ligne.
+  static Future<Fetched<List<HistoryEntry>>> getHistory({int limit = 3}) async {
     try {
-      return await _withConnection<List<HistoryEntry>>((conn) async {
+      final value = await _withConnection<List<HistoryEntry>>((conn) async {
         final result = await conn.execute(
           Sql.named('SELECT * FROM get_history(@n)'),
           parameters: {'n': limit},
@@ -130,9 +137,69 @@ class TransferService {
           );
         }).toList();
       });
+      if (value == null) return Fetched.notActivated();
+      return Fetched.ok(value);
     } catch (e) {
       await _record(e);
-      return null;
+      final info = describeDbError(e);
+      return Fetched.failure(info.spoken, offline: info.network);
+    }
+  }
+
+  /// Profil enregistre dans la base : nom, telephone, date de naissance,
+  /// type de compte. Les cles sont celles du stockage local.
+  static Future<Fetched<Map<String, String>>> getProfile() async {
+    try {
+      final value = await _withConnection<Map<String, String>>((conn) async {
+        final result = await conn.execute('SELECT * FROM get_profile()');
+        if (result.isEmpty) return <String, String>{};
+        final m = result.first.toColumnMap();
+        String text(String key) => (m[key] ?? '').toString();
+        return {
+          'account_number': text('p_account_number'),
+          'full_name': text('p_owner_name'),
+          'phone_number': text('p_phone_number'),
+          'birth_date': text('p_birth_date'),
+          'account_type': text('p_account_type'),
+        };
+      });
+      if (value == null) return Fetched.notActivated();
+      return Fetched.ok(value);
+    } catch (e) {
+      await _record(e);
+      final info = describeDbError(e);
+      return Fetched.failure(info.spoken, offline: info.network);
+    }
+  }
+
+  /// Envoie le profil local vers la base. Renvoie false en cas d'echec
+  /// (l'appelant le signale et reessaiera a la prochaine synchronisation).
+  static Future<bool> pushProfile({
+    required String name,
+    required String phone,
+    required String birthDate,
+    required String accountType,
+  }) async {
+    try {
+      final ok = await _withConnection<bool>((conn) async {
+        await conn.execute(
+          Sql.named('SELECT update_owner_name(@name)'),
+          parameters: {'name': name},
+        );
+        await conn.execute(
+          Sql.named('SELECT update_profile(@phone, @birth, @type)'),
+          parameters: {
+            'phone': phone,
+            'birth': birthDate,
+            'type': accountType,
+          },
+        );
+        return true;
+      });
+      return ok ?? false;
+    } catch (e) {
+      await _record(e);
+      return false;
     }
   }
 
@@ -196,8 +263,14 @@ class TransferService {
     if (raw.contains('INVALID_AMOUNT')) {
       return 'Le montant indiqué n\'est pas valide.';
     }
-    // Erreur technique (reseau, base, identifiants) : dit la vraie cause.
-    return 'Le virement a échoué. ${describeDbError(error).spoken}';
+    final info = describeDbError(error);
+    if (info.network) {
+      // Seul le virement exige internet : on le dit clairement.
+      return 'La connexion internet n\'est pas accessible. Le virement '
+          'exige internet et n\'a pas été effectué.';
+    }
+    // Erreur technique (base, identifiants) : dit la vraie cause.
+    return 'Le virement a échoué. ${info.spoken}';
   }
 }
 
@@ -206,6 +279,33 @@ class TransferResult {
   final String message;
   final double? newBalance;
   TransferResult(this.success, this.message, {this.newBalance});
+}
+
+class Fetched<T> {
+  /// Valeur lue en ligne, ou null en cas d'echec.
+  final T? value;
+
+  /// Vrai si l'echec vient de l'absence de connexion internet.
+  final bool offline;
+
+  /// Phrase a dire en cas d'echec.
+  final String? message;
+
+  const Fetched._(this.value, this.offline, this.message);
+
+  factory Fetched.ok(T value) => Fetched._(value, false, null);
+
+  factory Fetched.failure(String message, {bool offline = false}) =>
+      Fetched._(null, offline, message);
+
+  factory Fetched.notActivated() => Fetched._(
+        null,
+        false,
+        'Votre compte n\'est pas encore activé pour les opérations '
+            'bancaires.',
+      );
+
+  bool get ok => value != null;
 }
 
 class HistoryEntry {
@@ -221,6 +321,22 @@ class HistoryEntry {
     required this.amount,
     required this.date,
   });
+
+  Map<String, dynamic> toJson() => {
+        'sent': sent,
+        'account': otherAccount,
+        'name': otherName,
+        'amount': amount,
+        'date': date.millisecondsSinceEpoch,
+      };
+
+  factory HistoryEntry.fromJson(Map<String, dynamic> j) => HistoryEntry(
+        sent: j['sent'] == true,
+        otherAccount: j['account'] as String,
+        otherName: j['name'] as String,
+        amount: (j['amount'] as num).toDouble(),
+        date: DateTime.fromMillisecondsSinceEpoch(j['date'] as int),
+      );
 }
 
 class OtpResult {

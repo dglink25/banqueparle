@@ -14,6 +14,8 @@ import 'command_intent.dart';
 import 'grammars.dart';
 import 'onboarding_fields.dart';
 import 'stop_command.dart';
+import 'sync_service.dart';
+import 'local_cache.dart';
 import 'stt_helper.dart';
 import 'voice_dialog.dart';
 import 'vosk_engine.dart';
@@ -338,6 +340,9 @@ void onServiceStart(ServiceInstance service) async {
         maxRetries: 1,
         shortAnswer: true,
         grammar: kMenuGrammar,
+        // Vocabulaire restreint (hors ligne) a la premiere tentative ;
+        // la relance utilise le moteur Google en secours.
+        grammarAttempts: 1,
       );
       if (command != null) intent = detectIntent(command);
     }
@@ -526,6 +531,31 @@ void onServiceStart(ServiceInstance service) async {
       }
     }
   });
+
+  // --- Synchronisation des donnees bancaires (copie locale) ---
+  // Une premiere fois peu apres le demarrage, puis toutes les 2 minutes SI
+  // une lecture a echoue faute de connexion, ou si la derniere
+  // synchronisation date de plus de 20 minutes. Pas d'interrogation
+  // continue : elle maintiendrait la base Neon eveillee en permanence
+  // (quota du plan gratuit) et viderait la batterie.
+  Future<void> syncIfNeeded({bool force = false}) async {
+    try {
+      final last = await LocalCache.lastSync();
+      final stale = last == null ||
+          DateTime.now().difference(last) > const Duration(minutes: 20);
+      if (force || stale || await LocalCache.needsSync()) {
+        await SyncService.syncAll();
+      }
+    } catch (e) {
+      debugPrint('[Sync] $e');
+    }
+  }
+
+  unawaited(Future.delayed(
+    const Duration(seconds: 20),
+    () => syncIfNeeded(force: true),
+  ));
+  Timer.periodic(const Duration(minutes: 2), (_) => syncIfNeeded());
 
   listenLoop();
 }

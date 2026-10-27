@@ -264,7 +264,8 @@ class OnboardingStorage {
         k == _kAccountProvisioned ||
         k == _kPendingAction ||
         k == _kLastBackgroundSpeechAt ||
-        k.startsWith(_kFieldPrefix));
+        k.startsWith(_kFieldPrefix) ||
+        k.startsWith('cache_'));
     for (final k in keys.toList()) {
       await p.remove(k);
     }

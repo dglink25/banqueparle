@@ -16,9 +16,23 @@
 ///    lister que des mots francais courants, avec leurs accents.
 ///  - pas de tiret dans les mots.
 
+/// Poids des mots courts. "un" (1 son) et "deux" (2 sons) perdent souvent
+/// contre "[unk]" (modele de bruit, qui s'accorde a n'importe quel son bref),
+/// alors que "quatre" (4 sons) passe. Repeter un mot dans la liste augmente
+/// sa probabilite dans le modele de langage construit a partir de la
+/// grammaire : on le fait pour les chiffres courts.
+///
+/// Mots voisins : un accent produit souvent "une", "hein" pour "un" et
+/// "de", "des" pour "deux". Les lister permet au moteur de les proposer au
+/// lieu de repondre "[unk]" ; ils sont ramenes au bon sens plus loin
+/// (voice_dialog.dart et command_intent.dart).
+
 /// Reponses oui/non, avec l'arret d'urgence toujours possible.
 const List<String> kYesNoGrammar = [
-  'oui', 'non', 'un', 'deux', 'ouais', 'exact', 'correct',
+  'oui', 'oui', 'non', 'non',
+  'un', 'un', 'un', 'une', 'hein',
+  'deux', 'deux', 'deux', 'de', 'des',
+  'ouais', 'exact', 'correct',
   'stop', 'arrête', 'zéro',
   'banque parlante stop', 'banque parlante arrête',
   '[unk]',
@@ -28,7 +42,8 @@ const List<String> kYesNoGrammar = [
 const List<String> kMenuGrammar = [
   'solde', 'historique', 'virement', 'transfert', 'code',
   'code de sécurité', 'profil', 'conseiller',
-  'un', 'deux', 'trois', 'quatre', 'cinq', 'six',
+  'un', 'un', 'une', 'hein', 'deux', 'deux', 'de', 'des',
+  'trois', 'trois', 'quatre', 'cinq', 'cinq', 'six', 'six',
   'stop', 'arrête', 'zéro',
   'banque parlante stop',
   '[unk]',
@@ -36,7 +51,8 @@ const List<String> kMenuGrammar = [
 
 /// Choix dans la gestion du profil.
 const List<String> kProfileGrammar = [
-  'un', 'deux', 'trois', 'quatre',
+  'un', 'un', 'une', 'hein', 'deux', 'deux', 'de', 'des', 'trois', 'trois',
+  'quatre',
   'nom', 'téléphone', 'date de naissance', 'code secret',
   'terminer', 'rien', 'non',
   'stop', 'arrête', 'zéro',
