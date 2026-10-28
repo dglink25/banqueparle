@@ -24,6 +24,7 @@ import '../services/stt_helper.dart';
 import '../services/transfer_flow.dart';
 import '../services/tts_service.dart';
 import '../services/voice_dialog.dart';
+import '../services/vosk_guard.dart';
 import '../utils/app_colors.dart';
 import '../utils/native_channel.dart';
 import '../utils/onboarding_storage.dart';
@@ -67,6 +68,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Réinitialise tout verrouillage intempestif de Vosk pour réactiver le hors-ligne
+    unawaited(VoskGuard.reset());
+
+    // Met en pause l'écoute d'arrière-plan pour que le premier plan ait le contrôle exclusif du micro
+    try {
+      FlutterBackgroundService().invoke('pause_wake');
+    } catch (_) {}
+
     // Moteur de repli (Google). On memorise ses erreurs reelles
     // (reseau, langue, permission) : elles expliquent un "silence".
     _speech.initialize(onError: (e) {
@@ -117,13 +127,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _wakeSub?.cancel();
     _quitSub?.cancel();
+    try {
+      FlutterBackgroundService().invoke('resume_wake');
+    } catch (_) {}
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      try {
+        FlutterBackgroundService().invoke('pause_wake');
+      } catch (_) {}
       _checkPendingSteps(isColdStart: false);
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      try {
+        FlutterBackgroundService().invoke('resume_wake');
+      } catch (_) {}
     }
   }
 
@@ -235,34 +256,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _statusText = 'Enregistrement de vos informations...';
     });
 
-    await TtsService.instance.speak(
-      'Bienvenue sur Banque Parlante. Avant de commencer, j\'ai besoin '
-      'de quelques informations pour ouvrir votre profil.',
-    );
+    await OnboardingStorage.setFlowInProgress(true);
+    try {
+      await TtsService.instance.speak(
+        'Bienvenue sur Banque Parlante. Avant de commencer, j\'ai besoin '
+        'de quelques informations pour ouvrir votre profil.',
+      );
 
-    final listenFn = _listenFor(null);
+      final listenFn = _listenFor(null);
 
-    final personalOk = await runFormFields(
-      speak: TtsService.instance.speak,
-      listen: listenFn,
-      fields: kPersonalInfoFields,
-    );
-    final bankOk = personalOk &&
-        await runFormFields(
-          speak: TtsService.instance.speak,
-          listen: listenFn,
-          fields: kBankAccountFields,
-        );
+      final personalOk = await runFormFields(
+        speak: TtsService.instance.speak,
+        listen: listenFn,
+        fields: kPersonalInfoFields,
+      );
+      final bankOk = personalOk &&
+          await runFormFields(
+            speak: TtsService.instance.speak,
+            listen: listenFn,
+            fields: kBankAccountFields,
+          );
 
-    if (personalOk && bankOk) {
-      await OnboardingStorage.setNeedsFingerprintStep(true);
-      await OnboardingStorage.setNeedsPinStep(true);
-      await _runSecurity();
-    } else {
-      setState(() {
-        _state = _ScreenState.idle;
-        _statusText = 'Redites "Banque Parlante" pour continuer.';
-      });
+      if (personalOk && bankOk) {
+        await OnboardingStorage.setNeedsFingerprintStep(true);
+        await OnboardingStorage.setNeedsPinStep(true);
+        await _runSecurity();
+      } else {
+        setState(() {
+          _state = _ScreenState.idle;
+          _statusText = 'Redites "Banque Parlante" pour continuer.';
+        });
+      }
+    } finally {
+      if (_state != _ScreenState.securityStep && !_actionRunning) {
+        await OnboardingStorage.setFlowInProgress(false);
+      }
     }
   }
 
@@ -272,49 +300,56 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _statusText = 'Configuration de la sécurité de votre compte...';
     });
 
-    // Active le compte bancaire cote base de donnees. En cas d'echec
-    // (pas de connexion), l'enrolement continue ; l'activation sera
-    // retentee automatiquement a la premiere operation bancaire.
-    await _ensureProvisioned();
+    await OnboardingStorage.setFlowInProgress(true);
+    try {
+      // Active le compte bancaire cote base de donnees. En cas d'echec
+      // (pas de connexion), l'enrolement continue ; l'activation sera
+      // retentee automatiquement a la premiere operation bancaire.
+      await _ensureProvisioned();
 
-    final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
-    if (needsFingerprint) {
-      final fingerprintFlow = FingerprintEnrollmentFlow(
-        speak: TtsService.instance.speak,
-        listen: _listenFor(null),
-      );
-      await fingerprintFlow.run();
-    }
-
-    final needsPin = await OnboardingStorage.needsPinStep();
-    if (needsPin) {
-      final pinFlow = PinEnrollmentFlow(
-        speak: TtsService.instance.speak,
-        listen: _listenFor(null),
-      );
-      final pinOk = await pinFlow.run();
-      if (pinOk) {
-        final name = await OnboardingStorage.getField('full_name');
-        await OnboardingStorage.setCompleted(true);
-        final greetingName = (name != null && name.isNotEmpty) ? ' $name' : '';
-        await TtsService.instance.speak(
-          'Bienvenue$greetingName. Votre sécurité est configurée. '
-          'Votre compte est prêt.',
+      final needsFingerprint = await OnboardingStorage.needsFingerprintStep();
+      if (needsFingerprint) {
+        final fingerprintFlow = FingerprintEnrollmentFlow(
+          speak: TtsService.instance.speak,
+          listen: _listenFor(null),
         );
-        await _refreshEnrolled();
-        unawaited(_runVocalLoop(isWelcome: true));
-        return;
+        await fingerprintFlow.run();
       }
-    }
 
-    await _refreshEnrolled();
-    if (mounted) {
-      setState(() {
-        _state = _ScreenState.idle;
-        _statusText = _enrolled
-            ? 'Mode 100% vocal actif. Dites votre demande.'
-            : 'Redites "Banque Parlante" pour terminer la sécurité.';
-      });
+      final needsPin = await OnboardingStorage.needsPinStep();
+      if (needsPin) {
+        final pinFlow = PinEnrollmentFlow(
+          speak: TtsService.instance.speak,
+          listen: _listenFor(null),
+        );
+        final pinOk = await pinFlow.run();
+        if (pinOk) {
+          final name = await OnboardingStorage.getField('full_name');
+          await OnboardingStorage.setCompleted(true);
+          final greetingName = (name != null && name.isNotEmpty) ? ' $name' : '';
+          await TtsService.instance.speak(
+            'Bienvenue$greetingName. Votre sécurité est configurée. '
+            'Votre compte est prêt.',
+          );
+          await _refreshEnrolled();
+          unawaited(_runVocalLoop(isWelcome: true));
+          return;
+        }
+      }
+
+      await _refreshEnrolled();
+      if (mounted) {
+        setState(() {
+          _state = _ScreenState.idle;
+          _statusText = _enrolled
+              ? 'Mode 100% vocal actif. Dites votre demande.'
+              : 'Redites "Banque Parlante" pour terminer la sécurité.';
+        });
+      }
+    } finally {
+      if (!_actionRunning) {
+        await OnboardingStorage.setFlowInProgress(false);
+      }
     }
   }
 

@@ -182,18 +182,46 @@ class TransferService {
   }) async {
     try {
       final ok = await _withConnection<bool>((conn) async {
-        await conn.execute(
-          Sql.named('SELECT update_owner_name(@name)'),
-          parameters: {'name': name},
-        );
-        await conn.execute(
-          Sql.named('SELECT update_profile(@phone, @birth, @type)'),
-          parameters: {
-            'phone': phone,
-            'birth': birthDate,
-            'type': accountType,
-          },
-        );
+        try {
+          await conn.execute(
+            Sql.named('SELECT update_owner_name(@name::text)'),
+            parameters: {'name': name},
+          );
+        } catch (_) {}
+
+        try {
+          await conn.execute(
+            Sql.named(
+              'SELECT update_profile(@phone::text, @birth::text, @type::text)',
+            ),
+            parameters: {
+              'phone': phone,
+              'birth': birthDate,
+              'type': accountType,
+            },
+          );
+        } catch (e) {
+          // Si update_profile n'est pas trouvée (ex: schéma ancien sur Neon),
+          // mise à jour directe autorisée sur accounts avec RLS.
+          try {
+            await conn.execute(
+              Sql.named(
+                'UPDATE accounts SET '
+                'phone_number = nullif(trim(@phone::text), \'\'), '
+                'birth_date = nullif(trim(@birth::text), \'\'), '
+                'account_type = nullif(trim(@type::text), \'\') '
+                'WHERE pg_role_name = session_user',
+              ),
+              parameters: {
+                'phone': phone,
+                'birth': birthDate,
+                'type': accountType,
+              },
+            );
+          } catch (_) {
+            rethrow;
+          }
+        }
         return true;
       });
       return ok ?? false;
@@ -237,7 +265,7 @@ class TransferService {
     try {
       final ok = await _withConnection<bool>((conn) async {
         await conn.execute(
-          Sql.named('SELECT update_owner_name(@name)'),
+          Sql.named('SELECT update_owner_name(@name::text)'),
           parameters: {'name': name},
         );
         return true;

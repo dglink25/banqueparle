@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../utils/onboarding_storage.dart';
@@ -31,17 +32,34 @@ Future<String?> sttListenOnce(
         shouldStop: shouldStop,
       );
       if (!outcome.unavailable) {
-        final heard = outcome.text;
-        // Si un vrai mot du vocabulaire a été entendu (hors [unk])
-        if (heard != null && heard.isNotEmpty && !heard.contains('[unk]')) {
-          debugPrint('[Vosk] entendu : "$heard"');
-          unawaited(OnboardingStorage.setLastHeard('[hors ligne] $heard'));
-          return heard;
+        final raw = outcome.text;
+        if (raw != null) {
+          final cleaned = raw
+              .replaceAll('[unk]', ' ')
+              .replaceAll(RegExp(r'\s+'), ' ')
+              .trim();
+          if (cleaned.isNotEmpty) {
+            debugPrint('[Vosk] entendu : "$cleaned" (brut: "$raw")');
+            unawaited(OnboardingStorage.setLastHeard('[hors ligne] $cleaned'));
+            return cleaned;
+          }
         }
       }
     } catch (_) {}
-    // Si Vosk a renvoyé du silence ou [unk], on enchaîne immédiatement
+    // Si Vosk a renvoyé du silence ou que des bruits, on enchaîne immédiatement
     // avec le moteur Google STT ci-dessous sans échouer.
+  }
+
+  // Évite SpeechRecognizer.ERROR_BUSY sur Android :
+  // Le service d'arrière-plan ne doit pas monopoliser le micro.
+  try {
+    FlutterBackgroundService().invoke('pause_wake');
+  } catch (_) {}
+  if (speech.isListening) {
+    try {
+      await speech.stop();
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 150));
   }
 
   final short = shortAnswer ?? ListenHint.shortAnswer;

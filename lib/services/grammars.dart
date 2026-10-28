@@ -48,6 +48,14 @@ const List<String> kProfileGrammar = [
   '[unk]',
 ];
 
+/// Choix du type de compte (1 pour courant, 2 pour épargne).
+const List<String> kAccountTypeGrammar = [
+  '1', 'un', 'un', 'une', 'hein', 'premier', 'courant', 'compte courant',
+  '2', 'deux', 'deux', 'de', 'des', 'second', 'deuxième', 'épargne', 'epargne', 'compte épargne', 'compte epargne',
+  '0', 'stop', 'arrête', 'zéro', 'quitter',
+  '[unk]',
+];
+
 /// Mot-cle d'activation, suivi ou non d'une demande ("Banque Parlante
 /// solde") ou commande directe.
 List<String> buildWakeGrammar() {

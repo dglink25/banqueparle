@@ -34,9 +34,10 @@ Ce lien fonctionne sans compte GitHub et pointe toujours vers la dernière
 version. Il est aussi affiché dans le résumé de chaque exécution du workflow
 (onglet Actions).
 
-L'APK est volumineux (environ 100 Mo) : il embarque le modèle de
-reconnaissance vocale hors ligne (section 4). Le téléchargement se fait une
-seule fois ; ensuite, la reconnaissance vocale n'a pas besoin d'internet.
+> **Important lors de l'installation :**
+> - **Attendre la fin complète du téléchargement** (le fichier pèse environ 100 Mo en raison du modèle vocal hors-ligne). Ne pas cliquer tant que la notification de téléchargement indique « en cours ».
+> - **Si une ancienne version est déjà installée sur le téléphone** : désinstallez d'abord l'ancienne version de BanqueParle avant d'installer la nouvelle (Android bloque la mise à jour si la signature de sécurité diffère avec le message *« Le package semble ne pas être valide »*).
+> - L'APK est universel : il prend en charge **tous les téléphones Android (Android 5.0 Lollipop jusqu'à Android 15)** et toutes les architectures de processeur (ARM 32-bit, ARM 64-bit et x86_64).
 
 ---
 

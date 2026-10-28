@@ -1,5 +1,6 @@
 import '../utils/digit_parser.dart';
 import '../utils/onboarding_storage.dart';
+import 'grammars.dart';
 import 'voice_dialog.dart';
 
 /// -----------------------------------------------------------------------
@@ -30,11 +31,15 @@ class OnboardingField {
   /// en texte clair).
   final String Function(String raw)? normalize;
 
+  /// Grammaire Vosk optionnelle pour contraindre la reconnaissance
+  final List<String>? grammar;
+
   const OnboardingField(
     this.key,
     this.question, {
     this.confirmBack = true,
     this.normalize,
+    this.grammar,
   });
 }
 
@@ -109,6 +114,7 @@ const List<OnboardingField> kBankAccountFields = [
     'ou 2 pour compte épargne.',
     confirmBack: false,
     normalize: _normalizeAccountType,
+    grammar: kAccountTypeGrammar,
   ),
 ];
 
@@ -126,11 +132,23 @@ Future<String?> collectFieldValue({
       speak: speak,
       listen: listen,
       question: field.question,
+      grammar: field.grammar,
+      shortAnswer: field.grammar != null,
     );
     if (rawAnswer == null) return null;
 
     final value =
         field.normalize != null ? field.normalize!(rawAnswer) : rawAnswer;
+
+    if (field.key == 'account_type' &&
+        value != 'Compte courant' &&
+        value != 'Compte épargne') {
+      await speak(
+        'Je n\'ai pas bien compris votre choix. '
+        'Dites 1 pour compte courant, ou 2 pour compte épargne.',
+      );
+      continue;
+    }
 
     if (!field.confirmBack) return value;
 

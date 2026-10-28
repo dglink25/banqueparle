@@ -62,36 +62,38 @@ jobs:
           echo "--- MainActivity.kt appliqué ---"
           cat "$KOTLIN_DIR/MainActivity.kt"
 
-      # 6. S'assure que le minSdkVersion est suffisant pour speech_to_text /
-      #    flutter_local_notifications (API 23 minimum recommandé).
-      - name: Ajuster minSdkVersion si nécessaire
+      # 6. S'assure que le minSdkVersion est universel (API 21 = Android 5.0 et supérieur)
+      - name: Ajuster minSdkVersion pour compatibilité universelle
         run: |
           GRADLE_FILE="android/app/build.gradle.kts"
           if [ ! -f "$GRADLE_FILE" ]; then
             GRADLE_FILE="android/app/build.gradle"
           fi
           echo "Fichier Gradle détecté : $GRADLE_FILE"
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/' "$GRADLE_FILE" || true
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/' "$GRADLE_FILE" || true
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' "$GRADLE_FILE" || true
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' "$GRADLE_FILE" || true
 
-      # 7. Active le "core library desugaring", requis par le plugin
-      #    flutter_local_notifications (sinon le build échoue avec
-      #    "requires core library desugaring to be enabled").
-      - name: Activer le core library desugaring
+      # 7. Active le "core library desugaring", requis par flutter_local_notifications
+      #    et configure la signature release permanente et stable
+      - name: Activer le core library desugaring et signature release fixe
         run: |
           set -e
+          cp android_overrides/release.keystore android/app/release.keystore
           GRADLE_FILE="android/app/build.gradle.kts"
           if [ -f "$GRADLE_FILE" ]; then
             echo "Patch Kotlin DSL : $GRADLE_FILE"
             sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$GRADLE_FILE"
             printf '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n' >> "$GRADLE_FILE"
+            sed -i 's/signingConfig = signingConfigs.getByName("debug")/signingConfig = signingConfigs.getByName("release")/' "$GRADLE_FILE"
+            sed -i '/buildTypes {/i\    signingConfigs {\n        create("release") {\n            storeFile = file("release.keystore")\n            storePassword = "banqueparle_release"\n            keyAlias = "banqueparle"\n            keyPassword = "banqueparle_release"\n        }\n    }' "$GRADLE_FILE"
           else
-            GRADLE_FILE="android/app/build.gradle"
             echo "Patch Groovy DSL : $GRADLE_FILE"
             sed -i '/compileOptions {/a\        coreLibraryDesugaringEnabled true' "$GRADLE_FILE"
             printf "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n" >> "$GRADLE_FILE"
+            sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/' "$GRADLE_FILE"
+            sed -i '/buildTypes {/i\    signingConfigs {\n        release {\n            storeFile file("release.keystore")\n            storePassword "banqueparle_release"\n            keyAlias "banqueparle"\n            keyPassword "banqueparle_release"\n        }\n    }' "$GRADLE_FILE"
           fi
-          echo "--- Contenu final ---"
+          echo "--- Contenu final build.gradle ---"
           cat "$GRADLE_FILE"
 
       # 7b. Telecharge le modele de reconnaissance vocale hors ligne (Vosk,
@@ -156,10 +158,9 @@ jobs:
           esac
           echo "Secrets Neon presents et plausibles."
 
-      # 11. Construit l'APK en mode release. Les parametres de connexion
-      #     sont injectes a la compilation (--dart-define) depuis les
-      #     secrets GitHub : ils ne figurent jamais dans le depot.
-      - name: Build APK Release
+      # 11. Construit l'APK en mode release universel pour toutes les architectures.
+      #     Les parametres de connexion sont injectes a la compilation (--dart-define)
+      - name: Build APK Release Universel
         env:
           NEON_HOST: ${{ secrets.NEON_HOST }}
           NEON_DATABASE: ${{ secrets.NEON_DATABASE }}
@@ -173,11 +174,8 @@ jobs:
           if [ -z "$ADVISOR_PHONE" ]; then
             echo "::warning::ADVISOR_PHONE absent : la touche 6 (conseiller) annoncera que le numero n'est pas configure."
           fi
-          # --no-shrink : le moteur vocal (Vosk/JNA) ne supporte pas la reduction
-          # de code R8. --target-platform : telephones ARM uniquement, ce qui evite
-          # de multiplier la taille de l'APK par les bibliotheques x86.
+          # Build APK release universel (support ARM 32-bit, ARM 64-bit et x86_64)
           flutter build apk --release --no-shrink \
-            --target-platform android-arm,android-arm64 \
             --dart-define=NEON_HOST="$NEON_HOST" \
             --dart-define=NEON_DATABASE="$DB_NAME" \
             --dart-define=NEON_PROVISIONER_USER="$NEON_PROVISIONER_USER" \

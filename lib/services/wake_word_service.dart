@@ -188,6 +188,19 @@ void onServiceStart(ServiceInstance service) async {
   await VoskGuard.inspect();
   unawaited(VoskEngine.ensureReady());
 
+  bool pausedByForeground = false;
+  service.on('pause_wake').listen((event) async {
+    pausedByForeground = true;
+    try {
+      if (speech.isListening) await speech.stop();
+      if (VoskEngine.wakeRunning) await VoskEngine.stopWake();
+    } catch (_) {}
+  });
+
+  service.on('resume_wake').listen((event) async {
+    pausedByForeground = false;
+  });
+
   final cancelledRemote = <String>{};
   service.on('vosk_cancel').listen((event) {
     final id = event?['id']?.toString();
@@ -444,6 +457,13 @@ void onServiceStart(ServiceInstance service) async {
 
   Future<void> listenLoop() async {
     while (true) {
+      if (pausedByForeground) {
+        if (speech.isListening) await speech.stop();
+        if (VoskEngine.wakeRunning) await VoskEngine.stopWake();
+        await Future.delayed(const Duration(milliseconds: 500));
+        continue;
+      }
+
       // Le micro ne peut servir qu'a une seule reconnaissance a la fois :
       // pendant qu'un flux vocal tourne au premier plan, le service
       // laisse la main (sinon les deux ecoutes se perturbent). Jamais

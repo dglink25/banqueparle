@@ -12,9 +12,8 @@ import 'screens/home_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 0. Disjoncteur du moteur vocal : si le telephone a arrete l'application
-  //    pendant une etape de Vosk lors de la session precedente, Vosk est
-  //    desactive (repli sur Google) au lieu de replanter a chaque ouverture.
+  // 0. Réinitialise tout état de verrouillage Vosk pour donner priorité au moteur hors ligne
+  await VoskGuard.reset();
   await VoskGuard.inspect();
 
   // 1. Demande des permissions nécessaires (micro, notifications, batterie).

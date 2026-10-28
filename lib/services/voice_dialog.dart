@@ -73,9 +73,10 @@ const String kYesNoHint = 'Dites 1 pour oui, ou 2 pour non.';
 /// Interprete une reponse oui/non (vocalement : "oui", "non", "1", "2", ordinaux, etc.).
 /// Renvoie true (oui), false (non), ou null quand la reponse n'est pas comprise ou est ambigue.
 bool? parseYesNo(String raw, {bool strictYes = false}) {
-  if (raw.contains('[unk]')) return null;
+  final cleanRaw = raw.replaceAll('[unk]', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (cleanRaw.isEmpty) return null;
 
-  final clean = raw.replaceAll(RegExp(r"[-'\u2019]"), ' ');
+  final clean = cleanRaw.replaceAll(RegExp(r"[-'\u2019]"), ' ');
   final words = normalizedWords(clean);
   if (words.isEmpty) return null;
 
@@ -103,7 +104,7 @@ bool? parseYesNo(String raw, {bool strictYes = false}) {
   }
 
   // Vérification directe des chiffres dans le texte brut
-  final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+  final digits = cleanRaw.replaceAll(RegExp(r'[^0-9]'), '');
   if (digits == '1') yes = true;
   if (digits == '2') no = true;
 
@@ -122,7 +123,7 @@ Future<bool?> askYesNo({
   String simpleHint = 'Dites simplement 1 pour oui, ou 2 pour non.',
   int maxAttempts = 4,
   bool strictYes = false,
-  int googleFromAttempt = 1,
+  int googleFromAttempt = 999,
 }) async {
   var heardSomethingUnclear = false;
   for (var attempt = 0; attempt < maxAttempts; attempt++) {
