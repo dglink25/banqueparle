@@ -69,46 +69,58 @@ class ProfileFlow {
   }
 
   String? _parseChoice(String raw) {
-    final words = normalizedWords(raw).toSet();
+    if (raw.contains('[unk]')) return null;
+
+    final clean = raw.replaceAll(RegExp(r"[-'\u2019]"), ' ');
+    final words = normalizedWords(clean).toSet();
     bool has(List<String> w) => w.any(words.contains);
 
-    if (has(['nom', 'prenom'])) return 'full_name';
-    if (has(['telephone', 'numero', 'portable'])) return 'phone_number';
-    if (has(['date', 'naissance', 'anniversaire'])) return 'birth_date';
-    if (has(['code', 'secret'])) return 'pin';
-    if (has(['terminer', 'fin', 'fini', 'rien', 'non'])) {
+    if (has(['1', 'un', 'une', 'premier', 'premiere', '1er', 'hein', 'in', 'nom', 'prenom'])) {
+      return 'full_name';
+    }
+    if (has(['2', 'deux', 'second', 'seconde', 'deuxieme', '2e', 'de', 'des', 'telephone', 'numero', 'portable', 'tel'])) {
+      return 'phone_number';
+    }
+    if (has(['3', 'trois', 'troisieme', '3e', 'date', 'naissance', 'anniversaire'])) {
+      return 'birth_date';
+    }
+    if (has(['4', 'quatre', 'quatrieme', '4e', 'code', 'secret', 'pin'])) {
+      return 'pin';
+    }
+    if (has(['terminer', 'fin', 'fini', 'rien', 'non', 'quitter', 'stop', 'annuler'])) {
       return 'done';
     }
-    if (has(['1', 'un', 'une'])) return 'full_name';
-    if (has(['2', 'deux'])) return 'phone_number';
-    if (words.length == 1) {
-      // Approximations d'un chiffre dit seul.
-      if (has(['hein', 'in', 'ain', 'en'])) return 'full_name';
-      if (has(['de', 'des', 'deu', 'deus', 'dos'])) return 'phone_number';
-    }
-    if (has(['3', 'trois'])) return 'birth_date';
-    if (has(['4', 'quatre'])) return 'pin';
+
+    final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits == '1') return 'full_name';
+    if (digits == '2') return 'phone_number';
+    if (digits == '3') return 'birth_date';
+    if (digits == '4') return 'pin';
+    if (digits == '0') return 'done';
+
     return null;
   }
 
   Future<void> _readProfile() async {
-    // Profil EN LIGNE d'abord. Hors connexion, on le dit et on lit la copie
+    // Profil EN LIGNE d'abord. Hors connexion, on le dit clairement et on lit la copie
     // du telephone. Une modification locale non envoyee n'est jamais ecrasee.
     if (!await LocalCache.isProfileDirty()) {
       final remote = await TransferService.getProfile();
       if (remote.ok) {
         await SyncService.mergeProfile(remote.value!);
-      } else if (remote.offline) {
+        await LocalCache.markSynced();
+        await speak('Consultation de votre profil en ligne.');
+      } else {
         await LocalCache.setNeedsSync(true);
-        await speak(
-          'La connexion internet n\'est pas accessible. Voici le profil '
-          'enregistré sur ce téléphone.',
-        );
+        final intro = remote.offline
+            ? 'La connexion internet n\'est pas accessible. Voici votre profil enregistré en local sur ce téléphone.'
+            : (remote.message ?? 'Lecture locale de votre profil.');
+        await speak(intro);
       }
     } else {
       await speak(
         'Voici le profil enregistré sur ce téléphone, avec une modification '
-        'pas encore synchronisée.',
+        'locale en attente de synchronisation.',
       );
     }
 

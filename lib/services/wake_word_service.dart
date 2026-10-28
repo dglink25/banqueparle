@@ -3,7 +3,6 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_background_service_android/flutter_background_service_android.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -416,7 +415,10 @@ void onServiceStart(ServiceInstance service) async {
 
   void onVoskWakeText(String text) {
     if (handlingWakeWord) return;
-    if (!containsWakeWord(text)) return;
+    if (!containsWakeWord(text)) {
+      final intent = detectIntent(text);
+      if (intent == BankIntent.none) return;
+    }
     unawaited(handleWakeWordDetected(text));
   }
 
@@ -482,7 +484,9 @@ void onServiceStart(ServiceInstance service) async {
             onResult: (result) {
               if (handlingWakeWord) return;
               final text = result.recognizedWords;
-              if (!wakeArmed && !containsWakeWord(text)) return;
+              final hasWake = containsWakeWord(text);
+              final hasDirectCommand = detectIntent(text) != BankIntent.none;
+              if (!wakeArmed && !hasWake && !hasDirectCommand) return;
 
               wakeArmed = true;
               wakeText = text;
@@ -494,11 +498,14 @@ void onServiceStart(ServiceInstance service) async {
                     Timer(const Duration(milliseconds: 1100), fireWake);
               }
             },
-            listenFor: const Duration(seconds: 55),
-            pauseFor: const Duration(seconds: 8),
-            partialResults: true,
-            localeId: 'fr_FR',
-            listenMode: stt.ListenMode.confirmation,
+            listenOptions: stt.SpeechListenOptions(
+              listenMode: stt.ListenMode.confirmation,
+              partialResults: true,
+              cancelOnError: false,
+              listenFor: const Duration(seconds: 55),
+              pauseFor: const Duration(seconds: 8),
+              localeId: 'fr_FR',
+            ),
           );
         } catch (e) {
           debugPrint('[WakeWord] Erreur pendant l\'écoute: $e');

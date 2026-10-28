@@ -8,10 +8,9 @@ import 'voice_dialog.dart';
 
 /// Touche 1 - Consulter le solde. Sécurité : biométrie.
 ///
-/// Le solde est lu EN LIGNE, dans la base. Hors connexion, l'application le
-/// dit clairement puis donne le dernier solde synchronisé sur le téléphone,
-/// avec sa date. Le solde n'est jamais inventé : s'il n'y a ni connexion ni
-/// copie locale, elle le dit.
+/// Le solde est lu EN LIGNE dans la base de données.
+/// Hors connexion, l'application dit clairement que la connexion n'est pas
+/// accessible, puis donne le dernier solde synchronisé en local avec sa date.
 class BalanceFlow {
   final SpeakFn speak;
   final ListenFn listen;
@@ -30,31 +29,33 @@ class BalanceFlow {
     if (result.ok) {
       final balance = result.value!;
       await LocalCache.saveBalance(balance);
-      // Les quatre derniers chiffres du compte permettent de vérifier que
-      // c'est bien le compte attendu.
+      await LocalCache.markSynced();
+
       final account = await OnboardingStorage.getField('account_number');
       final tail = (account != null && account.length >= 4)
           ? ' Compte se terminant par '
               '${account.substring(account.length - 4).split('').join(' ')}.'
           : '';
-      await speak('Solde en ligne : ${speakAmount(balance)}.$tail');
+      await speak(
+        'Votre solde réel en ligne est de ${speakAmount(balance, withCurrency: true)}.$tail',
+      );
       return;
     }
 
     final intro = result.offline
         ? 'La connexion internet n\'est pas accessible.'
-        : (result.message ?? 'La lecture en ligne a échoué.');
+        : (result.message ?? 'La lecture en ligne de la base a échoué.');
     if (result.offline) await LocalCache.setNeedsSync(true);
 
     final cached = await LocalCache.loadBalance();
     if (cached != null) {
       await speak(
-        '$intro Voici votre dernier solde synchronisé, '
-        '${describeWhen(cached.at)} : ${speakAmount(cached.value)}.',
+        '$intro Voici votre dernier solde synchronisé en local, '
+        '${describeWhen(cached.at)} : ${speakAmount(cached.value, withCurrency: true)}.',
       );
     } else {
       await speak(
-        '$intro Aucun solde n\'a encore été synchronisé sur ce téléphone.',
+        '$intro Aucun solde n\'a encore été synchronisé en local sur ce téléphone.',
       );
     }
   }

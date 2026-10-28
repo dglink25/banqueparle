@@ -11,6 +11,7 @@ import '../services/balance_flow.dart';
 import '../services/command_intent.dart';
 import '../services/fingerprint_enrollment_flow.dart';
 import '../services/flow_control.dart';
+import '../services/grammars.dart';
 import '../services/history_flow.dart';
 import '../services/onboarding_fields.dart';
 import '../services/otp_flow.dart';
@@ -158,11 +159,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             return;
           }
         }
-        final recentBgSpeech =
-            await OnboardingStorage.wasBackgroundSpeechRecent();
-        if (!recentBgSpeech) {
-          await TtsService.instance.speakWelcome();
-        }
+        // Synchronisation en temps réel dès l'arrivée à l'écran
+        unawaited(SyncService.syncAll());
+        // Lancement direct de la boucle de dialogue 100% vocale
+        unawaited(_runVocalLoop(isWelcome: true));
         return;
       }
 
@@ -298,10 +298,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await OnboardingStorage.setCompleted(true);
         final greetingName = (name != null && name.isNotEmpty) ? ' $name' : '';
         await TtsService.instance.speak(
-          'Bienvenue$greetingName. Votre enrôlement est terminé. '
-          'Utilisez le pavé numérique à l\'écran, ou dites "Banque '
-          'Parlante" suivi de votre demande.',
+          'Bienvenue$greetingName. Votre sécurité est configurée. '
+          'Votre compte est prêt.',
         );
+        await _refreshEnrolled();
+        unawaited(_runVocalLoop(isWelcome: true));
+        return;
       }
     }
 
@@ -310,7 +312,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _state = _ScreenState.idle;
         _statusText = _enrolled
-            ? 'Dites "Banque Parlante" ou utilisez le pavé numérique.'
+            ? 'Mode 100% vocal actif. Dites votre demande.'
             : 'Redites "Banque Parlante" pour terminer la sécurité.';
       });
     }
@@ -533,6 +535,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           () => _runIntent(intent, speak, listen),
         );
         if (stopped) return;
+
+        // Une fois l'opération terminée, l'application ne s'arrête pas :
+        // elle demande vocalement à l'utilisateur s'il souhaite faire autre chose
+        if (mounted && myId == _requestSeq) {
+          await _askFollowUp(token, speak, listen);
+          return;
+        }
       }
     } on FlowCancelled {
       // Interrompu par l'appui sur une autre touche : rien a faire.
@@ -551,10 +560,147 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (mounted) {
           setState(() {
             _state = _ScreenState.idle;
-            _statusText =
-                'Dites "Banque Parlante" ou utilisez le pavé numérique.';
+            _statusText = 'Mode 100% vocal actif. Dites votre demande.';
           });
         }
+      }
+    }
+  }
+
+  /// Propose vocalement à l'utilisateur de continuer ou de quitter après une opération
+  Future<void> _askFollowUp(
+    CancelToken token,
+    SpeakFn speak,
+    ListenFn listen,
+  ) async {
+    if (!mounted) return;
+    setState(() {
+      _activeIntent = BankIntent.none;
+      _statusText = 'Souhaitez-vous faire autre chose ?';
+    });
+
+    final answer = await askWithRetry(
+      speak: speak,
+      listen: listen,
+      question:
+          'Souhaitez-vous faire autre chose ? Dites 1 pour oui, ou 2 pour non.',
+      maxRetries: 2,
+      shortAnswer: true,
+      grammar: kYesNoGrammar,
+    );
+
+    if (answer == null) {
+      await speak('Banque Parlante se met en veille. À bientôt.');
+      await _closeSession(announce: false);
+      return;
+    }
+
+    final parsed = parseYesNo(answer);
+    if (parsed == false) {
+      await speak('Très bien, au revoir et à bientôt sur Banque Parlante.');
+      await _closeSession(announce: false);
+      return;
+    }
+
+    if (parsed == true) {
+      unawaited(_runVocalLoop(isWelcome: false));
+      return;
+    }
+
+    // Si l'utilisateur a directement formulé une nouvelle commande
+    final nextIntent = detectIntent(answer);
+    if (nextIntent != BankIntent.none && nextIntent != BankIntent.quit) {
+      unawaited(_startAction(nextIntent));
+    } else if (nextIntent == BankIntent.quit) {
+      await _closeSession(announce: true);
+    } else {
+      unawaited(_runVocalLoop(isWelcome: false));
+    }
+  }
+
+  /// Boucle vocale interactive au premier plan : écoute et dialogue continus
+  /// sans avoir besoin de toucher ou cliquer sur l'écran.
+  Future<void> _runVocalLoop({required bool isWelcome}) async {
+    if (_actionRunning || !mounted) return;
+    final myId = ++_requestSeq;
+    final token = CancelToken();
+    _activeToken = token;
+
+    final speak = _speakFor(token);
+    final listen = _listenFor(token);
+
+    try {
+      if (isWelcome) {
+        final recentBgSpeech =
+            await OnboardingStorage.wasBackgroundSpeechRecent();
+        if (!recentBgSpeech) {
+          final name = await OnboardingStorage.getField('full_name');
+          await TtsService.instance.speakWelcome(name: name);
+        }
+      }
+
+      int silences = 0;
+      while (mounted && myId == _requestSeq && !_actionRunning) {
+        setState(() {
+          _state = _ScreenState.action;
+          _statusText = 'À votre écoute... Dites solde, virement, etc.';
+        });
+
+        ListenHint.shortAnswer = true;
+        ListenHint.grammar = kMenuGrammar;
+
+        String? heard;
+        try {
+          heard = await listen();
+        } finally {
+          ListenHint.shortAnswer = false;
+          ListenHint.grammar = null;
+        }
+
+        if (myId != _requestSeq) return;
+
+        if (heard != null && heard.trim().isNotEmpty) {
+          silences = 0;
+          final intent = detectIntent(heard);
+          if (intent != BankIntent.none) {
+            await _startAction(intent);
+            return;
+          } else {
+            await speak(
+              'Je n\'ai pas bien compris votre demande. Vous pouvez dire : '
+              'solde, virement, historique, code de sécurité, profil, '
+              'conseiller, ou quitter.',
+            );
+          }
+        } else {
+          silences++;
+          if (silences == 1) {
+            await speak(
+              'Je vous écoute. Vous pouvez dire par exemple : solde, virement, historique, ou quitter.',
+            );
+          } else if (silences == 2) {
+            await speak(
+              'Êtes-vous toujours là ? Dites votre demande ou dites quitter.',
+            );
+          } else {
+            await speak(
+              'Aucune réponse entendue. Banque Parlante se met en veille. '
+              'Dites "Banque Parlante" pour me réveiller.',
+            );
+            await _closeSession(announce: false);
+            return;
+          }
+        }
+      }
+    } on FlowCancelled {
+      // Interrompu par une touche physique ou autre commande
+    } catch (_) {
+    } finally {
+      if (myId == _requestSeq && !_actionRunning && mounted) {
+        setState(() {
+          _state = _ScreenState.idle;
+          _statusText = 'Mode 100% vocal actif. Dites votre demande.';
+        });
       }
     }
   }
@@ -616,7 +762,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppColors.blue, fontSize: 15),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.blueFaint(0.12),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.blue, width: 1),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.record_voice_over, color: AppColors.blue, size: 16),
+                    SizedBox(width: 6),
+                    Text(
+                      '100% Vocal : aucun clic requis',
+                      style: TextStyle(
+                        color: AppColors.blue,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
               _MicIndicator(active: busy),
               const SizedBox(height: 16),
               _Keypad(

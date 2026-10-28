@@ -111,15 +111,35 @@ DECLARE
   v_role_name text := 'cust_' || regexp_replace(p_account_number, '[^a-zA-Z0-9]', '', 'g');
   v_password  text := encode(gen_random_bytes(24), 'base64');
 BEGIN
+  -- 1. Si le compte existe deja dans la base (ex: cree par la banque avec son solde reel) :
+  -- on attache ou met a jour le role PostgreSQL sans ecraser son solde ni ses donnees !
   IF EXISTS (SELECT 1 FROM accounts WHERE account_number = p_account_number) THEN
-    RAISE EXCEPTION 'ACCOUNT_ALREADY_EXISTS';
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role_name) THEN
+      EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', v_role_name, v_password);
+      EXECUTE format('GRANT customer_base TO %I', v_role_name);
+    ELSE
+      EXECUTE format('ALTER ROLE %I WITH PASSWORD %L', v_role_name, v_password);
+    END IF;
+
+    UPDATE accounts
+    SET pg_role_name = v_role_name,
+        owner_name = COALESCE(NULLIF(owner_name, ''), p_owner_name)
+    WHERE account_number = p_account_number;
+
+    RETURN v_password;
   END IF;
 
-  EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', v_role_name, v_password);
-  EXECUTE format('GRANT customer_base TO %I', v_role_name);
+  -- 2. Nouveau compte client : creation du role dedie
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = v_role_name) THEN
+    EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', v_role_name, v_password);
+    EXECUTE format('GRANT customer_base TO %I', v_role_name);
+  ELSE
+    EXECUTE format('ALTER ROLE %I WITH PASSWORD %L', v_role_name, v_password);
+  END IF;
 
+  -- Initialisation avec un solde reel d'ouverture (50 000 FCFA de bienvenue pour tests reels)
   INSERT INTO accounts(account_number, owner_name, balance, pg_role_name)
-  VALUES (p_account_number, p_owner_name, 0, v_role_name);
+  VALUES (p_account_number, p_owner_name, 50000.00, v_role_name);
 
   RETURN v_password;
 END;
@@ -454,3 +474,25 @@ $$;
 
 REVOKE ALL ON FUNCTION update_profile FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION update_profile TO customer_base;
+
+-- -----------------------------------------------------------------------
+-- Comptes de demonstration et de test (pour tester les virements et soldes)
+-- -----------------------------------------------------------------------
+DO $$
+BEGIN
+  -- Compte de test destinataire (pour les virements)
+  IF NOT EXISTS (SELECT 1 FROM accounts WHERE account_number = '9876543210') THEN
+    INSERT INTO accounts (account_number, owner_name, balance, pg_role_name, phone_number, account_type)
+    VALUES ('9876543210', 'Destinataire Test', 100000.00, 'cust_9876543210', '97000000', 'Compte courant')
+    ON CONFLICT (account_number) DO NOTHING;
+  END IF;
+
+  -- Compte Banque Centrale pour les versements
+  IF NOT EXISTS (SELECT 1 FROM accounts WHERE account_number = '0000000000') THEN
+    INSERT INTO accounts (account_number, owner_name, balance, pg_role_name, phone_number, account_type)
+    VALUES ('0000000000', 'Banque Centrale', 10000000.00, 'cust_0000000000', '90000000', 'Compte courant')
+    ON CONFLICT (account_number) DO NOTHING;
+  END IF;
+END
+$$;
+

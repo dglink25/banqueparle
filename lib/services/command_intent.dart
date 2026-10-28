@@ -90,74 +90,123 @@ String stripWakeWord(String recognized) {
 }
 
 const _history = {
-  'historique', 'operations', 'operation', 'mouvements', 'mouvement',
-  'releve', 'dernier', 'derniere', 'derniers', 'dernieres',
+  'historique', 'historiques', 'operations', 'operation', 'mouvements', 'mouvement',
+  'releve', 'releves', 'transactions', 'transaction', 'dernier', 'derniere',
+  'derniers', 'dernieres',
 };
+
 const _transfer = {
   'virement', 'virements', 'transfert', 'transferts', 'transferer',
-  'envoyer', 'envoi', 'verser', 'versement',
+  'envoyer', 'envoi', 'verser', 'versement', 'virer', 'payer',
 };
-const _balance = {'solde', 'combien', 'reste'};
+
+const _balance = {
+  'solde', 'soldes', 'argent', 'montant', 'avoir', 'balance', 'disponible',
+  'combien', 'reste',
+};
+
 const _advisor = {
   'conseiller', 'conseillere', 'appeler', 'contacter', 'humain', 'agence',
+  'assistance', 'aide', 'support',
 };
+
 const _quit = {
   'quitter', 'quitte', 'fermer', 'sortir', 'arreter', 'arrete', 'arret',
-  'stop', 'stoppe', 'stopper', 'revoir', 'termine', 'urgence',
+  'stop', 'stoppe', 'stopper', 'revoir', 'aurevoir', 'termine', 'urgence',
+  'annuler', 'annule', 'fin',
 };
+
 const _profile = {
-  'profil', 'parametres', 'parametre', 'coordonnees', 'informations',
-  'modifier', 'changer',
+  'profil', 'profils', 'parametres', 'parametre', 'coordonnees', 'informations',
+  'modifier', 'changer', 'infos',
 };
-const _otp = {'otp', 'code', 'temporaire'};
+
+const _otp = {'otp', 'code', 'temporaire', 'securite', 'token', 'pass'};
 
 const _digitWords = {
   '0': '0', 'zero': '0',
-  '1': '1', 'un': '1', 'une': '1',
-  '2': '2', 'deux': '2',
-  '3': '3', 'trois': '3',
-  '4': '4', 'quatre': '4',
-  '5': '5', 'cinq': '5',
-  '6': '6', 'six': '6',
+  '1': '1', 'un': '1', 'une': '1', 'premier': '1', 'premiere': '1', '1er': '1', '1re': '1',
+  '2': '2', 'deux': '2', 'second': '2', 'seconde': '2', 'deuxieme': '2', '2e': '2', '2eme': '2',
+  '3': '3', 'trois': '3', 'troisieme': '3', '3e': '3', '3eme': '3',
+  '4': '4', 'quatre': '4', 'quatrieme': '4', '4e': '4', '4eme': '4',
+  '5': '5', 'cinq': '5', 'cinquieme': '5', '5e': '5', '5eme': '5',
+  '6': '6', 'six': '6', 'sixieme': '6', '6e': '6', '6eme': '6',
 };
 
-/// Mots qu'un accent produit a la place de "un" et "deux" quand le chiffre
-/// est dit seul. Ils figurent aussi dans les grammaires (grammars.dart).
 const _aloneDigit = {
   'hein': '1', 'in': '1', 'ain': '1', 'en': '1',
   'de': '2', 'des': '2', 'deu': '2', 'deus': '2', 'dos': '2',
 };
 
-/// Determine l'intention a partir de la phrase reconnue. Comparaison mot
-/// a mot (et non par sous-chaine) pour eviter les faux positifs.
+/// Determine l'intention a partir de la phrase reconnue.
 ///
-/// L'ordre compte : "dernier virement" doit donner l'historique et non un
-/// nouveau virement, et "changer mon code secret" doit donner le profil et
-/// non un code a usage unique. Les chiffres isoles ("trois") ne sont
-/// consideres qu'en dernier, quand aucun mot-cle n'a correspondu.
+/// L'ordre d'apparition des mots dans la phrase est pris en compte pour
+/// eviter qu'un echo vocal (ex: "solde avec s virement...") ne declenche
+/// un virement au lieu du solde demande.
 BankIntent detectIntent(String recognized) {
   final list = normalizedWords(recognized);
+  if (list.isEmpty) return BankIntent.none;
+
   final words = list.toSet();
-  bool any(Set<String> s) => words.any(s.contains);
 
-  if (any(_history)) return BankIntent.history;
-  if (any(_transfer)) return BankIntent.transfer;
-  if (any(_balance)) return BankIntent.balance;
-  if (any(_advisor)) return BankIntent.advisor;
-  if (any(_quit)) return BankIntent.quit;
-  if (any(_profile)) return BankIntent.profile;
-  if (any(_otp)) return BankIntent.otp;
+  // 1. Commande d'arrêt / quitter prioritaire
+  if (words.any(_quit.contains)) {
+    return BankIntent.quit;
+  }
 
+  // 2. Chiffre isolé ou désignation par touche ("1", "choix 1", "touche 2", "premier", etc.)
+  for (var i = 0; i < list.length; i++) {
+    final w = list[i];
+    final key = _digitWords[w];
+    if (key != null) {
+      // Si la phrase est courte (<= 3 mots, ex: "touche 1", "le 2"), le chiffre est l'intention directe
+      if (list.length <= 3) {
+        return intentForKey(key);
+      }
+    }
+  }
+
+  if (list.length == 1) {
+    final key = _aloneDigit[list.first];
+    if (key != null) return intentForKey(key);
+  }
+
+  // 3. Recherche des mots-clés bancaires selon leur ordre d'apparition dans la phrase
+  BankIntent firstFound = BankIntent.none;
+  int firstIndex = 999999;
+
+  void checkCategory(Set<String> category, BankIntent intent) {
+    for (var i = 0; i < list.length; i++) {
+      if (category.contains(list[i]) && i < firstIndex) {
+        firstIndex = i;
+        firstFound = intent;
+        break;
+      }
+    }
+  }
+
+  // Analyse par position du premier mot-clé rencontré
+  checkCategory(_balance, BankIntent.balance);
+  checkCategory(_history, BankIntent.history);
+  checkCategory(_transfer, BankIntent.transfer);
+  checkCategory(_otp, BankIntent.otp);
+  checkCategory(_profile, BankIntent.profile);
+  checkCategory(_advisor, BankIntent.advisor);
+
+  if (firstFound != BankIntent.none) {
+    return firstFound;
+  }
+
+  // 4. Si aucun mot-clé métier n'a été trouvé, repli sur n'importe quel chiffre présent
   for (final w in list) {
     final key = _digitWords[w];
     if (key != null) return intentForKey(key);
   }
 
-  // Approximations d'un chiffre dit seul ("hein" pour un, "de" pour deux) :
-  // acceptees uniquement quand elles constituent toute la reponse.
-  if (list.length == 1) {
-    final key = _aloneDigit[list.first];
+  for (final w in list) {
+    final key = _aloneDigit[w];
     if (key != null) return intentForKey(key);
   }
+
   return BankIntent.none;
 }

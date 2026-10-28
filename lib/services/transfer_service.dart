@@ -298,7 +298,7 @@ class Fetched<T> {
   factory Fetched.failure(String message, {bool offline = false}) =>
       Fetched._(null, offline, message);
 
-  factory Fetched.notActivated() => Fetched._(
+  factory Fetched.notActivated() => const Fetched._(
         null,
         false,
         'Votre compte n\'est pas encore activé pour les opérations '

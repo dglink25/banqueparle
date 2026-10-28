@@ -50,11 +50,27 @@ String _normalizeDigits(String raw) {
 }
 
 String _normalizeAccountType(String raw) {
-  final t = raw.toLowerCase();
-  if (t.contains('1') || t.contains('courant')) return 'Compte courant';
-  if (t.contains('2') || t.contains('epargne') || t.contains('épargne')) {
-    return 'Compte épargne';
+  final clean = raw.replaceAll(RegExp(r"[-'\u2019]"), ' ');
+  final words = clean.toLowerCase().split(RegExp(r'\s+'));
+  const currentTokens = {
+    '1', 'un', 'une', 'premier', 'premiere', '1er', '1re', 'hein', 'in',
+    'courant', 'courante',
+  };
+  const savingsTokens = {
+    '2', 'deux', 'second', 'seconde', 'deuxieme', '2e', '2eme', 'de', 'des',
+    'epargne', 'epargnes', 'épargne', 'épargnes',
+  };
+
+  for (final w in words) {
+    if (currentTokens.contains(w)) return 'Compte courant';
+    if (savingsTokens.contains(w)) return 'Compte épargne';
   }
+
+  final lower = raw.toLowerCase();
+  if (lower.contains('courant')) return 'Compte courant';
+  if (lower.contains('epargn') || lower.contains('épargn')) return 'Compte épargne';
+  if (lower.contains('1')) return 'Compte courant';
+  if (lower.contains('2')) return 'Compte épargne';
   return raw;
 }
 

@@ -3,34 +3,12 @@ import 'package:flutter/foundation.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../utils/onboarding_storage.dart';
+import 'tts_service.dart';
 import 'vosk_engine.dart';
 import 'voice_dialog.dart';
 
 /// Ecoute la reponse de l'utilisateur et renvoie le texte reconnu, ou null
-/// si rien n'a ete entendu apres [timeout] (10 secondes par defaut, comme
-/// demande : sans reponse, l'appelant relance la question).
-///
-/// Utilisee a la fois par le service d'arriere-plan (headless) et par
-/// l'interface au premier plan.
-///
-/// Points de robustesse (corriges apres des echecs repetes sur les mots
-/// courts : "un", "deux", "solde") :
-///
-///  - On conserve le MEILLEUR texte non vide recu. Avant, chaque resultat
-///    ecrasait le precedent, y compris un resultat final vide, ce qui
-///    pouvait effacer un "un" pourtant capte en resultat partiel.
-///  - Plusieurs tentatives d'ecoute dans la fenetre de [timeout] : si le
-///    moteur Android s'arrete de lui-meme sans resultat (debut de parole
-///    coupe, "no match"), on relance l'ecoute au lieu d'abandonner.
-///  - Les reponses courtes (oui/non, choix de menu) utilisent le mode
-///    "confirmation" du moteur, prevu pour ce cas, plutot que la dictee
-///    libre qui ecarte souvent les mots isoles a faible confiance.
-///  - On attend que le statut "ecoute" soit etabli avant de surveiller sa
-///    fin : sinon la fonction pouvait conclure "rien entendu" avant meme
-///    le demarrage reel de la reconnaissance.
-///
-/// [shouldStop] permet d'interrompre immediatement l'ecoute (appui sur une
-/// touche du pave numerique).
+/// si rien n'a ete entendu apres [timeout].
 Future<String?> sttListenOnce(
   stt.SpeechToText speech, {
   Duration timeout = const Duration(seconds: 10),
@@ -38,34 +16,40 @@ Future<String?> sttListenOnce(
   bool? shortAnswer,
   bool Function()? shouldStop,
 }) async {
-  // Vocabulaire connu : ecoute hors ligne Vosk (fiable, tolerante a
-  // l'accent). Si le moteur n'est pas disponible, on se replie sur le
-  // moteur Google ci-dessous, comme avant.
+  // S'assure que le haut-parleur TTS est totalement coupé
+  try {
+    await TtsService.instance.stop();
+  } catch (_) {}
+
+  // 1. Si un vocabulaire restreint est défini, tentative avec Vosk (hors ligne).
   final grammar = ListenHint.grammar;
   if (grammar != null) {
-    final outcome = await VoiceRouter.listenConstrained(
-      grammar: grammar,
-      timeout: timeout,
-      shouldStop: shouldStop,
-    );
-    if (!outcome.unavailable) {
-      final heard = outcome.text;
-      debugPrint('[Vosk] entendu : "$heard"');
-      unawaited(OnboardingStorage.setLastHeard(
-        heard == null ? '(silence)' : '[hors ligne] $heard',
-      ));
-      return heard;
-    }
+    try {
+      final outcome = await VoiceRouter.listenConstrained(
+        grammar: grammar,
+        timeout: const Duration(seconds: 4), // court délai pour ne pas bloquer l'utilisateur
+        shouldStop: shouldStop,
+      );
+      if (!outcome.unavailable) {
+        final heard = outcome.text;
+        // Si un vrai mot du vocabulaire a été entendu (hors [unk])
+        if (heard != null && heard.isNotEmpty && !heard.contains('[unk]')) {
+          debugPrint('[Vosk] entendu : "$heard"');
+          unawaited(OnboardingStorage.setLastHeard('[hors ligne] $heard'));
+          return heard;
+        }
+      }
+    } catch (_) {}
+    // Si Vosk a renvoyé du silence ou [unk], on enchaîne immédiatement
+    // avec le moteur Google STT ci-dessous sans échouer.
   }
 
   final short = shortAnswer ?? ListenHint.shortAnswer;
   final pause = pauseFor ??
       (short ? const Duration(seconds: 2) : const Duration(seconds: 4));
 
-  // Court delai apres la synthese vocale : evite de capter sa toute fin
-  // (relachement tardif du focus audio) sans retarder la reponse de
-  // l'utilisateur, qui parle souvent des la fin de la question.
-  await Future.delayed(const Duration(milliseconds: 150));
+  // Délai de protection acoustique anti-écho du haut-parleur
+  await Future.delayed(const Duration(milliseconds: 300));
 
   final overall = DateTime.now().add(timeout);
   String best = '';
@@ -80,45 +64,51 @@ Future<String?> sttListenOnce(
       await speech.listen(
         onResult: (result) {
           final words = result.recognizedWords.trim();
-          if (words.isNotEmpty) heardNow = words; // jamais ecraser par du vide
+          if (words.isNotEmpty) heardNow = words;
+          if (short && result.finalResult && words.isNotEmpty) {
+            unawaited(speech.stop());
+          }
         },
-        listenFor: remaining < const Duration(seconds: 4)
-            ? const Duration(seconds: 4)
-            : remaining,
-        pauseFor: pause,
-        partialResults: true,
-        localeId: 'fr_FR',
-        listenMode:
-            short ? stt.ListenMode.confirmation : stt.ListenMode.dictation,
+        listenOptions: stt.SpeechListenOptions(
+          listenMode: stt.ListenMode.dictation,
+          partialResults: true,
+          cancelOnError: false,
+          listenFor: remaining < const Duration(seconds: 4)
+              ? const Duration(seconds: 4)
+              : remaining,
+          pauseFor: pause,
+          localeId: 'fr_FR',
+        ),
       );
     } catch (_) {
       started = false;
     }
 
     if (!started) {
-      await Future.delayed(const Duration(milliseconds: 400));
+      await Future.delayed(const Duration(milliseconds: 300));
       continue;
     }
 
-    // Laisse le statut "ecoute" s'etablir avant de surveiller sa fin.
-    final readyBy = DateTime.now().add(const Duration(milliseconds: 1500));
+    // Laisse le statut "ecoute" s'etablir avant de surveiller sa fin
+    final readyBy = DateTime.now().add(const Duration(milliseconds: 1200));
     while (!speech.isListening && DateTime.now().isBefore(readyBy)) {
       await Future.delayed(const Duration(milliseconds: 50));
     }
 
-    // Attend la fin naturelle de cette session (silence detecte, ou
-    // arret du moteur), avec un filet de securite.
-    final hardEnd = DateTime.now().add(timeout + const Duration(seconds: 3));
+    // Attend la fin naturelle de l'écoute
+    final hardEnd = DateTime.now().add(timeout + const Duration(seconds: 2));
     while (speech.isListening && DateTime.now().isBefore(hardEnd)) {
       if (shouldStop?.call() ?? false) break;
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future.delayed(const Duration(milliseconds: 80));
     }
-    if (speech.isListening) {
-      await speech.stop();
-    }
-    // Laisse arriver le resultat final, emis juste apres l'arret.
-    await Future.delayed(const Duration(milliseconds: 300));
 
+    if (speech.isListening) {
+      try {
+        await speech.stop();
+      } catch (_) {}
+    }
+
+    await Future.delayed(const Duration(milliseconds: 200));
     if (heardNow.isNotEmpty) best = heardNow;
   }
 

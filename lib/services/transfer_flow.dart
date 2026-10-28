@@ -25,6 +25,17 @@ class TransferFlow {
   TransferFlow({required this.speak, required this.listen});
 
   Future<void> run() async {
+    // Le virement nécessite obligatoirement la connexion internet
+    final checkOnline = await TransferService.getBalance();
+    if (checkOnline.offline) {
+      await speak(
+        'La connexion internet n\'est pas accessible. Un virement bancaire '
+        'nécessite obligatoirement une connexion internet active pour échanger '
+        'avec la base de données.',
+      );
+      return;
+    }
+
     final toAccount = await _collectAccountNumber();
     if (toAccount == null) return _cancelled();
 
@@ -36,7 +47,7 @@ class TransferFlow {
     final confirmed = await askYesNo(
       speak: speak,
       listen: listen,
-      question: 'Vous allez envoyer ${speakAmount(amount)} vers le compte '
+      question: 'Vous allez envoyer ${speakAmount(amount, withCurrency: true)} vers le compte '
           '${_spellDigits(toAccount)}. Confirmez-vous ce virement ?',
       maxAttempts: 3,
       strictYes: true,
@@ -66,10 +77,11 @@ class TransferFlow {
       // Copie locale a jour tout de suite : solde, puis historique.
       if (result.newBalance != null) {
         await LocalCache.saveBalance(result.newBalance!);
+        await LocalCache.markSynced();
       }
       unawaited(SyncService.syncAll());
       final balanceText = result.newBalance != null
-          ? ' Votre nouveau solde est de ${speakAmount(result.newBalance!)}.'
+          ? ' Votre nouveau solde est de ${speakAmount(result.newBalance!, withCurrency: true)}.'
           : '';
       await speak('${result.message}$balanceText');
     } else {
@@ -137,7 +149,7 @@ class TransferFlow {
       final ok = await askYesNo(
         speak: speak,
         listen: listen,
-        question: 'Vous avez dit ${speakAmount(amount)}. Est-ce correct ?',
+        question: 'Vous avez dit ${speakAmount(amount, withCurrency: true)}. Est-ce correct ?',
         strictYes: true,
       );
       if (ok == true) return amount;

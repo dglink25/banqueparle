@@ -7,10 +7,9 @@ import 'voice_dialog.dart';
 
 /// Touche 2 - Historique des opérations. Sécurité : biométrie.
 ///
-/// Lu EN LIGNE ; hors connexion, l'application le dit puis énumère la
-/// dernière copie synchronisée, avec sa date. Les opérations du modèle sont
-/// les virements émis et reçus ; un prélèvement est un débit comme un autre,
-/// il apparaît comme virement envoyé.
+/// Lu EN LIGNE dans la base de données.
+/// Hors connexion, l'application dit clairement que la connexion n'est pas
+/// accessible, puis énumère la dernière copie synchronisée en local avec sa date.
 class HistoryFlow {
   final SpeakFn speak;
   final ListenFn listen;
@@ -35,11 +34,12 @@ class HistoryFlow {
     if (result.ok) {
       final entries = result.value!;
       await LocalCache.saveHistory(entries);
+      await LocalCache.markSynced();
       if (entries.isEmpty) {
-        await speak('Historique en ligne : vous n\'avez aucune opération.');
+        await speak('Historique en ligne : vous n\'avez aucune opération enregistrée.');
         return;
       }
-      await speak('Historique en ligne.');
+      await speak('Historique des opérations en ligne.');
       await _enumerate(entries);
       return;
     }
@@ -52,20 +52,20 @@ class HistoryFlow {
     final cached = await LocalCache.loadHistory();
     if (cached == null) {
       await speak(
-        '$intro Aucun historique n\'a encore été synchronisé sur ce '
+        '$intro Aucun historique n\'a encore été synchronisé en local sur ce '
         'téléphone.',
       );
       return;
     }
     if (cached.value.isEmpty) {
       await speak(
-        '$intro Dernière synchronisation ${describeWhen(cached.at)} : aucune '
+        '$intro Dernière synchronisation locale ${describeWhen(cached.at)} : aucune '
         'opération.',
       );
       return;
     }
     await speak(
-      '$intro Voici vos dernières opérations synchronisées, '
+      '$intro Voici vos dernières opérations synchronisées en local, '
       '${describeWhen(cached.at)}.',
     );
     await _enumerate(cached.value);
@@ -82,8 +82,8 @@ class HistoryFlow {
     for (var i = 0; i < entries.length; i++) {
       final e = entries[i];
       final direction = e.sent
-          ? 'Virement envoyé de ${speakAmount(e.amount)} à ${e.otherName}'
-          : 'Virement reçu de ${speakAmount(e.amount)} de ${e.otherName}';
+          ? 'Virement envoyé de ${speakAmount(e.amount, withCurrency: true)} à ${e.otherName}'
+          : 'Virement reçu de ${speakAmount(e.amount, withCurrency: true)} de ${e.otherName}';
       final last4 = e.otherAccount.length > 4
           ? e.otherAccount.substring(e.otherAccount.length - 4)
           : e.otherAccount;

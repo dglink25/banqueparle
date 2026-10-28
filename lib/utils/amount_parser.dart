@@ -42,11 +42,26 @@ double? parseAmount(String raw) {
 }
 
 /// Montant pret a etre lu par la synthese vocale, avec precision :
-/// 1250 -> "1250" ; 1250.5 -> "1250 virgule 50".
-String speakAmount(double value) {
-  if (value == 0) return 'zéro';
-  final fixed = value.toStringAsFixed(2);
-  final parts = fixed.split('.');
-  if (parts[1] == '00') return parts[0];
-  return '${parts[0]} virgule ${parts[1]}';
+/// 1250 -> "1 250" ; 1250.5 -> "1 250 virgule 50".
+String speakAmount(double value, {bool withCurrency = false}) {
+  final String text;
+  if (value == 0) {
+    text = 'zéro';
+  } else {
+    final fixed = value.toStringAsFixed(2);
+    final parts = fixed.split('.');
+    final integerPart = int.tryParse(parts[0]) ?? 0;
+    // Formatage des milliers avec un espace pour une prononciation fluide du TTS
+    final formattedInt = integerPart.toString().replaceAllMapped(
+          RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+          (m) => '${m[1]} ',
+        );
+    if (parts[1] == '00') {
+      text = formattedInt;
+    } else {
+      text = '$formattedInt virgule ${parts[1]}';
+    }
+  }
+  if (!withCurrency) return text;
+  return (value == 0 || value == 1) ? '$text franc CFA' : '$text francs CFA';
 }

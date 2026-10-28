@@ -14,5 +14,5 @@ class AppColors {
   static const Color blue = Color(0xFF1A73E8);
   static const Color white = Color(0xFFFFFFFF);
 
-  static Color blueFaint([double opacity = 0.08]) => blue.withOpacity(opacity);
+  static Color blueFaint([double opacity = 0.08]) => blue.withValues(alpha: opacity);
 }
