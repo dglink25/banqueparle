@@ -28,7 +28,9 @@ class OnboardingStorage {
   /// (action en attente, champs du formulaire, drapeau de flux en cours).
   static Future<SharedPreferences> _prefs() async {
     final p = await SharedPreferences.getInstance();
-    await p.reload();
+    try {
+      await p.reload();
+    } catch (_) {}
     return p;
   }
 

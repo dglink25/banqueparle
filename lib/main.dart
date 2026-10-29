@@ -1,41 +1,25 @@
-import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'services/wake_word_service.dart';
-import 'services/tts_service.dart';
-import 'services/vosk_engine.dart';
-import 'services/vosk_guard.dart';
 import 'utils/app_colors.dart';
-import 'utils/permissions_helper.dart';
 import 'screens/home_screen.dart';
 
 Future<void> main() async {
+  // 1. Assure l'initialisation du binding Flutter
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 0. Réinitialise tout état de verrouillage Vosk pour donner priorité au moteur hors ligne
-  await VoskGuard.reset();
-  await VoskGuard.inspect();
+  // 2. Gestion globale et résiliente des erreurs pour empêcher la fermeture intempestive de l'application
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    debugPrint('[FlutterError] ${details.exceptionAsString()}');
+  };
 
-  // 1. Demande des permissions nécessaires (micro, notifications, batterie).
-  await PermissionsHelper.requestAll();
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[PlatformDispatcherError] $error');
+    return true; // Erreur interceptée, empêche le crash du processus
+  };
 
-  // 2. Initialise le TTS (prépare le moteur de synthèse vocale).
-  await TtsService.instance.init();
-
-  // 3. Démarre le service d'arrière-plan qui écoute en continu le
-  //    mot-clé « Banque Parlante », y compris application fermée.
-  await initializeWakeWordService();
-
-  // Extrait le modele de reconnaissance hors ligne (premiere ouverture :
-  // une trentaine de secondes). Differe de quelques secondes pour que
-  // l'ecran et les demandes d'autorisation soient deja affiches, et sans
-  // bloquer l'interface ; le service d'arriere-plan le charge des qu'il
-  // est pret.
-  unawaited(Future.delayed(
-    const Duration(seconds: 5),
-    VoskEngine.prepareModelFromAssets,
-  ));
-
+  // 3. Monte immédiatement l'application pour afficher l'interface et attacher l'Activity Android
   runApp(const BanqueParleApp());
 }
 

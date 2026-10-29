@@ -24,10 +24,13 @@ import '../services/stt_helper.dart';
 import '../services/transfer_flow.dart';
 import '../services/tts_service.dart';
 import '../services/voice_dialog.dart';
+import '../services/vosk_engine.dart';
 import '../services/vosk_guard.dart';
+import '../services/wake_word_service.dart';
 import '../utils/app_colors.dart';
 import '../utils/native_channel.dart';
 import '../utils/onboarding_storage.dart';
+import '../utils/permissions_helper.dart';
 
 enum _ScreenState { idle, formStep, securityStep, action }
 
@@ -69,24 +72,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Réinitialise tout verrouillage intempestif de Vosk pour réactiver le hors-ligne
-    unawaited(VoskGuard.reset());
-
-    // Met en pause l'écoute d'arrière-plan pour que le premier plan ait le contrôle exclusif du micro
-    try {
-      FlutterBackgroundService().invoke('pause_wake');
-    } catch (_) {}
-
-    // Moteur de repli (Google). On memorise ses erreurs reelles
-    // (reseau, langue, permission) : elles expliquent un "silence".
-    _speech.initialize(onError: (e) {
-      final message = e.errorMsg;
-      if (message != 'error_no_match' && message != 'error_speech_timeout') {
-        unawaited(OnboardingStorage.setLastHeard(
-          '(erreur du moteur Google : $message)',
-        ));
-      }
+    // Initialisation post-frame sécurisée : attend que l'Activity Android
+    // soit attachée et que l'écran soit affiché pour demander les autorisations.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeServicesAndPermissions();
     });
+
     _refreshEnrolled();
 
     final service = FlutterBackgroundService();
@@ -100,25 +91,90 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _closeSession(announce: false);
     });
 
-    // Diagnostic : relit regulierement la derniere phrase entendue (ecrite
-    // aussi par le service d'arriere-plan, d'ou la relecture du disque).
+    // Diagnostic : relit regulierement la derniere phrase entendue
     _heardTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
-      final heard = await OnboardingStorage.getLastHeard();
-      final dbError = await OnboardingStorage.getLastDbError();
-      final voice = await OnboardingStorage.getVoiceStatus();
-      if (mounted &&
-          (heard != _lastHeard ||
-              dbError != _lastDbError ||
-              voice != _voiceStatus)) {
-        setState(() {
-          _lastHeard = heard;
-          _lastDbError = dbError;
-          _voiceStatus = voice;
-        });
-      }
+      try {
+        final heard = await OnboardingStorage.getLastHeard();
+        final dbError = await OnboardingStorage.getLastDbError();
+        final voice = await OnboardingStorage.getVoiceStatus();
+        if (mounted &&
+            (heard != _lastHeard ||
+                dbError != _lastDbError ||
+                voice != _voiceStatus)) {
+          setState(() {
+            _lastHeard = heard;
+            _lastDbError = dbError;
+            _voiceStatus = voice;
+          });
+        }
+      } catch (_) {}
     });
+  }
 
-    _checkPendingSteps(isColdStart: true);
+  Future<void> _initializeServicesAndPermissions() async {
+    // 0. Réinitialise tout état de verrouillage Vosk pour donner priorité au moteur hors ligne
+    try {
+      await VoskGuard.reset();
+      await VoskGuard.inspect();
+    } catch (e) {
+      debugPrint('[Init] VoskGuard reset error: $e');
+    }
+
+    // 1. Initialise le TTS (prépare le moteur de synthèse vocale)
+    try {
+      await TtsService.instance.init();
+    } catch (e) {
+      debugPrint('[Init] TTS init error: $e');
+    }
+
+    // 2. Demande des permissions nécessaires (micro, notifications, batterie)
+    //    avec l'interface utilisateur déjà affichée et l'Activity Android attachée.
+    bool micOk = false;
+    try {
+      micOk = await PermissionsHelper.requestAll();
+    } catch (e) {
+      debugPrint('[Init] Permissions error: $e');
+    }
+
+    // 3. Configure le service d'arrière-plan et le démarre SI le micro est autorisé
+    try {
+      await initializeWakeWordService();
+      if (micOk) {
+        await startWakeWordServiceIfPermitted();
+      }
+    } catch (e) {
+      debugPrint('[Init] WakeWordService error: $e');
+    }
+
+    // 4. Met en pause l'écoute d'arrière-plan pour que le premier plan ait le contrôle exclusif du micro
+    try {
+      FlutterBackgroundService().invoke('pause_wake');
+    } catch (_) {}
+
+    // 5. Initialise le moteur Google de repli
+    try {
+      await _speech.initialize(onError: (e) {
+        final message = e.errorMsg;
+        if (message != 'error_no_match' && message != 'error_speech_timeout') {
+          unawaited(OnboardingStorage.setLastHeard(
+            '(erreur du moteur Google : $message)',
+          ));
+        }
+      });
+    } catch (e) {
+      debugPrint('[Init] Speech initialize error: $e');
+    }
+
+    // 6. Extraction différée du modèle Vosk hors ligne
+    unawaited(Future.delayed(
+      const Duration(seconds: 4),
+      () => VoskEngine.prepareModelFromAssets(),
+    ));
+
+    // 7. Vérifie les étapes d'enrôlement ou lance le dialogue vocal
+    if (mounted) {
+      _checkPendingSteps(isColdStart: true);
+    }
   }
 
   @override
@@ -143,6 +199,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       try {
+        unawaited(startWakeWordServiceIfPermitted());
         FlutterBackgroundService().invoke('resume_wake');
       } catch (_) {}
     }

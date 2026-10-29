@@ -62,7 +62,7 @@
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="microphone"
             android:exported="false"
-            tools:replace="android:exported" />
+            tools:replace="android:exported,android:foregroundServiceType" />
 
         <receiver
             android:name="id.flutter.flutter_background_service.WatchdogReceiver"

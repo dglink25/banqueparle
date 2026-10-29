@@ -8,6 +8,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../utils/onboarding_storage.dart';
+import '../utils/permissions_helper.dart';
 import '../utils/text_normalize.dart';
 import 'command_intent.dart';
 import 'grammars.dart';
@@ -72,55 +73,79 @@ Future<bool> _fieldsAllPresent(List<OnboardingField> fields) async {
   return true;
 }
 
-/// Initialise le service d'arrière-plan (à appeler une seule fois, dans main()).
+/// Initialise le service d'arrière-plan sans le démarrer avant d'avoir les permissions.
 Future<void> initializeWakeWordService() async {
-  final service = FlutterBackgroundService();
+  try {
+    final service = FlutterBackgroundService();
 
-  final flnp = FlutterLocalNotificationsPlugin();
-  const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-  await flnp.initialize(const InitializationSettings(android: androidInit));
+    final flnp = FlutterLocalNotificationsPlugin();
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    await flnp.initialize(const InitializationSettings(android: androidInit));
 
-  const serviceChannel = AndroidNotificationChannel(
-    kNotifChannelId,
-    kNotifChannelName,
-    description: 'Indique que BanqueParle écoute le mot-clé en arrière-plan.',
-    importance: Importance.low,
-  );
+    const serviceChannel = AndroidNotificationChannel(
+      kNotifChannelId,
+      kNotifChannelName,
+      description: 'Indique que BanqueParle écoute le mot-clé en arrière-plan.',
+      importance: Importance.low,
+    );
 
-  const wakeChannel = AndroidNotificationChannel(
-    'banqueparle_wake_channel',
-    'BanqueParle - Réveil',
-    description: 'Réveille l\'application quand le mot-clé est détecté.',
-    importance: Importance.max,
-  );
+    const wakeChannel = AndroidNotificationChannel(
+      'banqueparle_wake_channel',
+      'BanqueParle - Réveil',
+      description: 'Réveille l\'application quand le mot-clé est détecté.',
+      importance: Importance.max,
+    );
 
-  await flnp
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(serviceChannel);
-  await flnp
-      .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin>()
-      ?.createNotificationChannel(wakeChannel);
+    await flnp
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(serviceChannel);
+    await flnp
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
+        ?.createNotificationChannel(wakeChannel);
 
-  await service.configure(
-    androidConfiguration: AndroidConfiguration(
-      onStart: onServiceStart,
-      autoStart: true,
-      isForegroundMode: true,
-      notificationChannelId: kNotifChannelId,
-      initialNotificationTitle: 'BanqueParle',
-      initialNotificationContent: 'Écoute du mot-clé « Banque Parlante »…',
-      foregroundServiceNotificationId: kForegroundNotifId,
-    ),
-    iosConfiguration: IosConfiguration(
-      autoStart: true,
-      onForeground: onServiceStart,
-      onBackground: (service) async => true,
-    ),
-  );
+    await service.configure(
+      androidConfiguration: AndroidConfiguration(
+        onStart: onServiceStart,
+        autoStart: false,
+        isForegroundMode: true,
+        notificationChannelId: kNotifChannelId,
+        initialNotificationTitle: 'BanqueParle',
+        initialNotificationContent: 'Écoute du mot-clé « Banque Parlante »…',
+        foregroundServiceNotificationId: kForegroundNotifId,
+      ),
+      iosConfiguration: IosConfiguration(
+        autoStart: false,
+        onForeground: onServiceStart,
+        onBackground: (service) async => true,
+      ),
+    );
+  } catch (e) {
+    debugPrint('[WakeWordService] Erreur initialisation service: $e');
+  }
+}
 
-  await service.startService();
+/// Démarre le service d'arrière-plan si et seulement si la permission micro est accordée.
+/// Sur Android 14+, démarrer un service de type microphone sans permission accordée
+/// lève un crash fatal SecurityException immédiat.
+Future<void> startWakeWordServiceIfPermitted() async {
+  try {
+    final hasMic = await PermissionsHelper.hasMicrophonePermission();
+    if (!hasMic) {
+      debugPrint('[WakeWord] Permission micro non encore accordée : démarrage différé.');
+      return;
+    }
+
+    final service = FlutterBackgroundService();
+    final isRunning = await service.isRunning();
+    if (!isRunning) {
+      await service.startService();
+      debugPrint('[WakeWord] Service d\'arrière-plan démarré avec succès.');
+    }
+  } catch (e) {
+    debugPrint('[WakeWord] Erreur lors du démarrage du service: $e');
+  }
 }
 
 /// Point d'entrée exécuté dans l'isolate du service d'arrière-plan.

@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -60,12 +61,14 @@ class MainActivity : FlutterFragmentActivity() {
         try {
             startActivity(intent)
         } catch (e: Exception) {
-            val fallback = Intent(
-                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:$packageName"),
-            )
-            fallback.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            startActivity(fallback)
+            try {
+                val fallback = Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName"),
+                )
+                fallback.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(fallback)
+            } catch (_: Exception) {}
         }
     }
 
@@ -75,11 +78,19 @@ class MainActivity : FlutterFragmentActivity() {
     /// l'ecran. Sinon, le numero est pre-compose dans le composeur
     /// (ACTION_DIAL), qui reste utilisable.
     private fun callPhone(number: String) {
-        val granted = checkSelfPermission(Manifest.permission.CALL_PHONE) ==
-            PackageManager.PERMISSION_GRANTED
-        val action = if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL
-        val intent = Intent(action, Uri.parse("tel:" + Uri.encode(number)))
-        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        startActivity(intent)
+        try {
+            val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
+                PackageManager.PERMISSION_GRANTED
+            val action = if (granted) Intent.ACTION_CALL else Intent.ACTION_DIAL
+            val intent = Intent(action, Uri.parse("tel:" + Uri.encode(number)))
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(number)))
+                dialIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                startActivity(dialIntent)
+            } catch (_: Exception) {}
+        }
     }
 }
