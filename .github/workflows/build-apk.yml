@@ -83,12 +83,14 @@ jobs:
           if [ -f "$GRADLE_FILE" ]; then
             echo "Patch Kotlin DSL : $GRADLE_FILE"
             sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$GRADLE_FILE"
+            sed -i '/compileOptions {/i\    packaging {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }' "$GRADLE_FILE"
             printf '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n' >> "$GRADLE_FILE"
             sed -i 's/signingConfig = signingConfigs.getByName("debug")/signingConfig = signingConfigs.getByName("release")/' "$GRADLE_FILE"
             sed -i '/buildTypes {/i\    signingConfigs {\n        create("release") {\n            storeFile = file("release.keystore")\n            storePassword = "banqueparle_release"\n            keyAlias = "banqueparle"\n            keyPassword = "banqueparle_release"\n        }\n    }' "$GRADLE_FILE"
           else
             echo "Patch Groovy DSL : $GRADLE_FILE"
             sed -i '/compileOptions {/a\        coreLibraryDesugaringEnabled true' "$GRADLE_FILE"
+            sed -i '/compileOptions {/i\    packagingOptions {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }' "$GRADLE_FILE"
             printf "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n" >> "$GRADLE_FILE"
             sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/' "$GRADLE_FILE"
             sed -i '/buildTypes {/i\    signingConfigs {\n        release {\n            storeFile file("release.keystore")\n            storePassword "banqueparle_release"\n            keyAlias "banqueparle"\n            keyPassword "banqueparle_release"\n        }\n    }' "$GRADLE_FILE"

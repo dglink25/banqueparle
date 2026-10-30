@@ -29,9 +29,7 @@
     <application
         android:label="BanqueParle"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
-        android:extractNativeLibs="true"
-        tools:replace="android:extractNativeLibs">
+        android:icon="@mipmap/ic_launcher">
 
         <activity
             android:name=".MainActivity"
