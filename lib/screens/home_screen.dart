@@ -201,7 +201,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       try {
-        unawaited(startWakeWordServiceIfPermitted());
         FlutterBackgroundService().invoke('resume_wake');
       } catch (_) {}
     }

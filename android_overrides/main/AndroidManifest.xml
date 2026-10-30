@@ -66,13 +66,15 @@
 
         <receiver
             android:name="id.flutter.flutter_background_service.WatchdogReceiver"
+            android:enabled="false"
             android:exported="false"
-            tools:replace="android:exported" />
+            tools:replace="android:enabled,android:exported" />
 
         <receiver
             android:name="id.flutter.flutter_background_service.BootReceiver"
+            android:enabled="false"
             android:exported="false"
-            tools:replace="android:exported">
+            tools:replace="android:enabled,android:exported">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

@@ -114,6 +114,7 @@ Future<void> initializeWakeWordService() async {
         initialNotificationTitle: 'BanqueParle',
         initialNotificationContent: 'Écoute du mot-clé « Banque Parlante »…',
         foregroundServiceNotificationId: kForegroundNotifId,
+        foregroundServiceTypes: [AndroidForegroundType.microphone],
       ),
       iosConfiguration: IosConfiguration(
         autoStart: false,
@@ -192,6 +193,11 @@ void onServiceStart(ServiceInstance service) async {
   );
 
   if (service is AndroidServiceInstance) {
+    try {
+      await service.setAsForegroundService();
+    } catch (e) {
+      debugPrint('[WakeWord] Erreur setAsForegroundService: $e');
+    }
     service.on('setAsForeground').listen((event) {
       service.setAsForegroundService();
     });
