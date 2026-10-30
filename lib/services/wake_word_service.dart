@@ -284,7 +284,7 @@ void onServiceStart(ServiceInstance service) async {
       question: kStopConfirmQuestion,
       maxAttempts: 3,
     );
-    return answer != false;
+    return answer == true;
   }
 
   Future<void> handleOnce(String utterance) async {

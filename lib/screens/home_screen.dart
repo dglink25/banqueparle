@@ -80,16 +80,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _refreshEnrolled();
 
-    final service = FlutterBackgroundService();
-    _wakeSub = service.on('wake_detected').listen((event) {
-      if (!mounted) return;
-      _checkPendingSteps(isColdStart: false);
-    });
-    // Commande "quitter" dite apres le mot-cle : le service d'arriere-plan
-    // a deja prononce l'au revoir, l'interface se ferme sans reparler.
-    _quitSub = service.on('quit_requested').listen((event) {
-      _closeSession(announce: false);
-    });
+    try {
+      final service = FlutterBackgroundService();
+      _wakeSub = service.on('wake_detected').listen((event) {
+        if (!mounted) return;
+        _checkPendingSteps(isColdStart: false);
+      });
+      // Commande "quitter" dite apres le mot-cle : le service d'arriere-plan
+      // a deja prononce l'au revoir, l'interface se remet en veille sans reparler.
+      _quitSub = service.on('quit_requested').listen((event) {
+        _closeSession(announce: false);
+      });
+    } catch (_) {}
 
     // Diagnostic : relit regulierement la derniere phrase entendue
     _heardTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
@@ -436,8 +438,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// au lieu d'etre pris pour une reponse (nom, montant, numero...).
   ListenFn _listenFor(CancelToken? t) => interceptStop(_rawListenFor(t));
 
-  /// Demande confirmation de l'arret. Sans reponse claire, l'arret est
-  /// execute : l'utilisateur l'a demande, il peut s'agir d'une urgence.
+  /// Demande confirmation de l'arret. Sans reponse claire ou en cas de silence,
+  /// l'arret N'EST PAS execute afin d'eviter toute fermeture intempestive.
   Future<bool> _confirmStop(CancelToken? t) async {
     final answer = await askYesNo(
       speak: _speakFor(t),
@@ -445,7 +447,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       question: kStopConfirmQuestion,
       maxAttempts: 3,
     );
-    return answer != false;
+    return answer == true;
   }
 
   Future<void> _performStop(CancelToken? t) async {
@@ -823,7 +825,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await OnboardingStorage.setPendingAction(null);
     await OnboardingStorage.setFlowInProgress(false);
     _actionRunning = false;
-    await SystemNavigator.pop();
+
+    // Reste sur l'écran d'accueil en veille au lieu de quitter l'application
+    if (mounted) {
+      setState(() {
+        _state = _ScreenState.idle;
+        _activeIntent = BankIntent.none;
+        _statusText = 'BanqueParle est en veille. Dites "Banque Parlante" ou touchez le micro pour commencer.';
+      });
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -879,7 +889,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
               const SizedBox(height: 12),
-              _MicIndicator(active: busy),
+              InkWell(
+                onTap: () {
+                  HapticFeedback.mediumImpact();
+                  if (_state == _ScreenState.idle) {
+                    _checkPendingSteps(isColdStart: true);
+                  }
+                },
+                borderRadius: BorderRadius.circular(50),
+                child: _MicIndicator(active: busy),
+              ),
               const SizedBox(height: 16),
               _Keypad(
                 enabled: _enrolled,
