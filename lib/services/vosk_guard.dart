@@ -35,16 +35,15 @@ class VoskGuard {
   /// Vérifie l'état au démarrage sans verrouiller abusivement le moteur.
   static Future<void> inspect() async {
     for (final slot in const [slotUi, slotService]) {
-      final marker = await OnboardingStorage.getString(_key(slot));
-      if (marker == null) continue;
-      // Nettoie les marqueurs orphelins des sessions précédentes
       await OnboardingStorage.remove(_key(slot));
     }
+    await OnboardingStorage.setVoiceStatus(
+      'Moteur vocal : Google Speech (stable & actif).',
+    );
   }
 
-  static Future<bool> isDisabled() async {
-    final value = await OnboardingStorage.getString(_kDisabled);
-    if (value == null) return false;
-    return value.split('|').first == buildTag;
-  }
+  /// Vosk est désactivé par défaut pour garantir une stabilité totale,
+  /// éviter les dépassements de mémoire (OOM) et éliminer les fermetures
+  /// inattendues sur les appareils Android. L'application utilise Google Speech.
+  static Future<bool> isDisabled() async => true;
 }

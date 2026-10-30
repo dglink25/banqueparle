@@ -217,9 +217,9 @@ void onServiceStart(ServiceInstance service) async {
   // delegue ses ecoutes par messages.
   VoskEngine.isOwner = true;
   await VoskGuard.inspect();
-  unawaited(VoskEngine.ensureReady());
-
-  bool pausedByForeground = false;
+  // Par défaut en pause au démarrage : laisse l'écran actif au premier plan
+  // interagir avec l'utilisateur sans conflit matériel sur le microphone.
+  bool pausedByForeground = true;
   service.on('pause_wake').listen((event) async {
     pausedByForeground = true;
     try {

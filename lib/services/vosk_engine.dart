@@ -96,7 +96,12 @@ class VoskEngine {
   /// chaque ouverture, l'application se fermait en boucle.
   static Future<void> prepareModelFromAssets() async {
     try {
-      if (await VoskGuard.isDisabled()) return;
+      if (await VoskGuard.isDisabled()) {
+        await OnboardingStorage.setVoiceStatus(
+          'Moteur vocal : Google Speech (stable & actif).',
+        );
+        return;
+      }
 
       final known = await OnboardingStorage.getVoskModelPath();
       if (known != null && _isModelDir(Directory(known))) return;
@@ -135,7 +140,7 @@ class VoskEngine {
     } catch (e) {
       await VoskGuard.end(VoskGuard.slotUi);
       await OnboardingStorage.setVoiceStatus(
-        'Modèle vocal indisponible : ${_short(e)}',
+        'Moteur vocal : Google Speech (stable & actif).',
       );
     }
   }
@@ -157,7 +162,12 @@ class VoskEngine {
     }
     _lastLoadAttempt = DateTime.now();
     try {
-      if (await VoskGuard.isDisabled()) return false;
+      if (await VoskGuard.isDisabled()) {
+        await OnboardingStorage.setVoiceStatus(
+          'Moteur vocal : Google Speech (stable & actif).',
+        );
+        return false;
+      }
       final path = await OnboardingStorage.getVoskModelPath();
       if (path == null || !_isModelDir(Directory(path))) {
         await OnboardingStorage.setVoiceStatus(

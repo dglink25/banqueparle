@@ -96,17 +96,13 @@ jobs:
           echo "--- Contenu final build.gradle ---"
           cat "$GRADLE_FILE"
 
-      # 7b. Telecharge le modele de reconnaissance vocale hors ligne (Vosk,
-      #     francais, 41 Mo, licence Apache 2.0). Il est integre a l'APK ;
-      #     il n'est pas versionne dans le depot.
-      - name: Telecharger le modele vocal Vosk (francais)
+      # 7b. Dossier assets/models léger (Vosk désactivé pour stabilité maximale et APK ultra-léger)
+      - name: Préparer le dossier assets/models
         run: |
           set -e
           mkdir -p assets/models
-          curl -fL --retry 4 --retry-delay 5 -o assets/models/vosk-model-small-fr-0.22.zip \
-            https://alphacephei.com/vosk/models/vosk-model-small-fr-0.22.zip
-          ls -l assets/models/
-          unzip -tq assets/models/vosk-model-small-fr-0.22.zip
+          touch assets/models/.gitkeep
+          ls -la assets/models/
 
       # 8. Récupère les dépendances Dart/Flutter
       - name: flutter pub get
