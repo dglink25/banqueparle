@@ -62,41 +62,13 @@ jobs:
           echo "--- MainActivity.kt appliqué ---"
           cat "$KOTLIN_DIR/MainActivity.kt"
 
-      # 6. S'assure que le minSdkVersion est universel (API 21 = Android 5.0 et supérieur)
-      - name: Ajuster minSdkVersion pour compatibilité universelle
-        run: |
-          GRADLE_FILE="android/app/build.gradle.kts"
-          if [ ! -f "$GRADLE_FILE" ]; then
-            GRADLE_FILE="android/app/build.gradle"
-          fi
-          echo "Fichier Gradle détecté : $GRADLE_FILE"
-          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/' "$GRADLE_FILE" || true
-          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 21/' "$GRADLE_FILE" || true
-
-      # 7. Active le "core library desugaring", requis par flutter_local_notifications
-      #    et configure la signature release permanente et stable
-      - name: Activer le core library desugaring et signature release fixe
+      # 6-7. Copie uniquement le keystore (build.gradle.kts est déjà configuré dans le repo,
+      #      minSdk=21 et signingConfigs sont déjà présents — pas besoin de patcher)
+      - name: Copier le keystore release
         run: |
           set -e
           cp android_overrides/release.keystore android/app/release.keystore
-          GRADLE_FILE="android/app/build.gradle.kts"
-          if [ -f "$GRADLE_FILE" ]; then
-            echo "Patch Kotlin DSL : $GRADLE_FILE"
-            sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$GRADLE_FILE"
-            sed -i '/compileOptions {/i\    packaging {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }' "$GRADLE_FILE"
-            printf '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n' >> "$GRADLE_FILE"
-            sed -i 's/signingConfig = signingConfigs.getByName("debug")/signingConfig = signingConfigs.getByName("release")/' "$GRADLE_FILE"
-            sed -i '/buildTypes {/i\    signingConfigs {\n        create("release") {\n            storeFile = file("release.keystore")\n            storePassword = "banqueparle_release"\n            keyAlias = "banqueparle"\n            keyPassword = "banqueparle_release"\n        }\n    }' "$GRADLE_FILE"
-          else
-            echo "Patch Groovy DSL : $GRADLE_FILE"
-            sed -i '/compileOptions {/a\        coreLibraryDesugaringEnabled true' "$GRADLE_FILE"
-            sed -i '/compileOptions {/i\    packagingOptions {\n        jniLibs {\n            useLegacyPackaging = true\n        }\n    }' "$GRADLE_FILE"
-            printf "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n" >> "$GRADLE_FILE"
-            sed -i 's/signingConfig signingConfigs.debug/signingConfig signingConfigs.release/' "$GRADLE_FILE"
-            sed -i '/buildTypes {/i\    signingConfigs {\n        release {\n            storeFile file("release.keystore")\n            storePassword "banqueparle_release"\n            keyAlias "banqueparle"\n            keyPassword "banqueparle_release"\n        }\n    }' "$GRADLE_FILE"
-          fi
-          echo "--- Contenu final build.gradle ---"
-          cat "$GRADLE_FILE"
+          echo "Keystore copié."
 
       # 7b. Dossier assets/models léger (Vosk désactivé pour stabilité maximale et APK ultra-léger)
       - name: Préparer le dossier assets/models
