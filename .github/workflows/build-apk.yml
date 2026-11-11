@@ -48,19 +48,30 @@ jobs:
         run: |
           flutter create --platforms=android --org com.banqueparle --project-name banqueparle .
 
-      # 5. Applique nos permissions et déclarations personnalisées
-      #    (mot-clé vocal, service d'arrière-plan, notifications plein écran,
-      #    biométrie).
-      - name: Appliquer l'AndroidManifest.xml et le MainActivity.kt personnalisés
+      # 5. Applique nos fichiers Android personnalisés (écrase ceux générés par flutter create)
+      #    - build.gradle.kts : desugaring, signing, minSdk=21, packaging
+      #    - AndroidManifest.xml : permissions vocales, service arrière-plan, biométrie
+      #    - MainActivity.kt : implémentation personnalisée
+      - name: Appliquer les overrides Android personnalisés
         run: |
           set -e
+          # build.gradle.kts (doit être copié AVANT flutter pub get)
+          cp android_overrides/app/build.gradle.kts android/app/build.gradle.kts
+          echo "--- build.gradle.kts appliqué ---"
+          cat android/app/build.gradle.kts
+
+          # AndroidManifest.xml
           cp android_overrides/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+
+          # MainActivity.kt
           KOTLIN_DIR="android/app/src/main/kotlin/com/banqueparle/banqueparle"
           mkdir -p "$KOTLIN_DIR"
           cp android_overrides/main/kotlin/MainActivity.kt "$KOTLIN_DIR/MainActivity.kt"
-          cp android_overrides/test/widget_test.dart test/widget_test.dart
           echo "--- MainActivity.kt appliqué ---"
           cat "$KOTLIN_DIR/MainActivity.kt"
+
+          # widget_test.dart
+          cp android_overrides/test/widget_test.dart test/widget_test.dart
 
       # 6-7. Copie uniquement le keystore (build.gradle.kts est déjà configuré dans le repo,
       #      minSdk=21 et signingConfigs sont déjà présents — pas besoin de patcher)
